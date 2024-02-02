@@ -1,0 +1,38 @@
+---
+title: "Alternate composite models"
+format: pdf
+editor: visual
+execute: 
+  echo: false
+  error: false
+  message: false
+  warning: false
+---
+
+## Goal
+
+To compare alternative models for estimating the composite species indicators used in the State of Canada's Birds, i.e., the "Summary Models" for the State of Canada's Birds. These indicators are intended to represent the mean status of species within a group through time; e.g., the mean overall change in grassland bird populations since 1970, for all years from 1970 through the present.
+
+## Summary Models
+
+There are two conceptual models to compare here:
+
+1.  Standard model - estimating the mean annual status of each species in each year. Data are the log-scaled, indices of annual status relative to a base-year (usually 1970) for each species and the model is fit independently in each year.
+
+2.  Differences model - estimating the time-series of the mean composite indicator by fixing the value of the first year (e.g., fixed at 0), then estimating the indicator in year t+1 as year 1 plus the mean of all species differences from the first year. Data are the time series of log-scale annual differences for each species.
+
+```{r}
+library(tidyverse)
+library(cmdstanr)
+```
+
+## Conceptual steps
+
+The modeling effort needs to start with estimated population trajectories for each species, smooth the population trajectories, calculate the index values to support a given summary model, fit the summary models, and plot the resulting indicators.
+
+```{r}
+#| echo: false
+2 * 2
+```
+
+The `echo: false` option disables the printing of code (only output is displayed).
