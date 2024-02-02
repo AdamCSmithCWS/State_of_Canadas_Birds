@@ -24,15 +24,223 @@ There are two conceptual models to compare here:
 ```{r}
 library(tidyverse)
 library(cmdstanr)
+source("functions/GAM_basis_function_mgcv.R")
+  q2_5 <- function(x)c(q2_5 = quantile(x,probs = c(0.025),
+                                       names = FALSE))
+    q97_5 <- function(x)c(q97_5 = quantile(x,probs = c(0.975),
+                                       names = FALSE))
+    
 ```
 
 ## Conceptual steps
 
 The modeling effort needs to start with estimated population trajectories for each species, smooth the population trajectories, calculate the index values to support a given summary model, fit the summary models, and plot the resulting indicators.
 
-```{r}
-#| echo: false
-2 * 2
+### Load estimated trajectories
+
+Here, just using output from the BBS as an example.
+
+```{r, eval=FALSE}
+all_bbs_inds <- read_csv("c:/github/CWS_2022_BBS_Analyses/website/BBS_2022_annual_indices_for_socb.csv") %>% 
+  filter(area_name == "Canada",
+         period == "Long-term") 
+
+saveRDS(all_bbs_inds,"data/Canadian_BBS_indices.rds")
+
 ```
 
-The `echo: false` option disables the printing of code (only output is displayed).
+Selecting out the grassland bird annual indices of abundance from the BBS. Then log-transforming the index values and calculating a log-scale standard error of the indices by transforming the credible limits and approximating the standard error as the credible interval width divided by 3.9 (assuming an approximately normal 95 percent CI).
+
+```{r}
+#|echo: true
+#|
+bbs_canadian_indices <- readRDS("data/Canadian_BBS_indices.rds")
+socb_groups_2019 <- read_csv("data/SOCB Data Sources_Source de donnees EPOC.csv")
+
+grassland_sp <- socb_groups_2019 %>% 
+  select(c(1,13)) %>% 
+  rename(english = 'English Name_Nom anglais',
+         grassland = 'Grassland Birds _Oiseaux de prairie') %>% 
+  filter(grassland == "Included_Inclus") %>% 
+  select(english) %>% 
+  unlist()
+
+grassland_inds <- bbs_canadian_indices %>% 
+  filter(species_name %in% grassland_sp,
+         !is.na(index)) %>% 
+  mutate(ln_index = log(index),
+         ln_lci = log(lower_ci),
+         ln_uci = log(upper_ci),
+         ln_index_sd = (ln_uci-ln_lci)/3.9) %>% 
+  group_by(species_name) %>% 
+    mutate(yearn = year-(min(year)-1)) %>% 
+  arrange(species_name,year)
+
+```
+
+### Smooth indices accounting for uncertainty
+
+We want the composite indicators to track long- and medium-term changes in populations that are shared across many species in a group. Given that inferential goal, we want the species-level indices to represent only those medium- and long-term changes. Sharp annual fluctuations may represent true variation in the species' population, but they can mask the longer term changes that are primary interest of this high-level summary. Following previous State of Canada's Birds reports, we use a generalized additive model (GAM) that accounts for the uncertainty of each estimated annual index of abundance with a measurement-error structure.
+
+```{r}
+
+smooth_inds_out <- NULL
+for(species in grassland_sp){
+  
+  if(species %in% grassland_inds$species_name){
+  inds <- grassland_inds %>% 
+    filter(species_name == species) %>% 
+    select(species_name,year,
+           ln_index,ln_index_sd,yearn) 
+  
+  n_years <- as.integer(length(min(inds$year):max(inds$year)))
+  n_indices <- as.integer(nrow(inds))
+  n_knots <- as.integer(round(n_indices/3))
+  
+  
+    gam_data <- gam_basis(inds$yearn,
+                          nknots = n_knots,
+                          sm_name = "year")
+    stan_data <- list(
+      n_years = n_years,
+      n_indices = n_indices,
+      n_knots_year = gam_data$nknots_year,
+      year = inds$yearn,
+      ln_index = inds$ln_index,
+      ln_index_sd = inds$ln_index_sd,
+      year_basis = gam_data$year_basis
+    )
+      ## fit model with cmdstanr
+  file <- "models/GAM_smooth_model.stan"
+  mod <- cmdstan_model(file)
+  
+  fit <- mod$sample(data = stan_data,
+                    parallel_chains = 4,
+                    refresh = 0)
+
+  sum <- fit$summary(variables = NULL,
+                     "mean",
+                     "sd",
+                     "ess_bulk",
+                     "rhat",
+                     q2_5 = q2_5,
+                     q97_5 = q97_5)
+  
+  mx_rhat <- max(sum$rhat,na.rm = TRUE)
+  if(mx_rhat > 1.05){
+      fit <- mod$sample(data = stan_data,
+                    parallel_chains = 4,
+                    iter_warmup = 8000,
+                    iter_sampling = 8000,
+                    thin = 8,
+                    refresh = 0)
+  sum <- fit$summary(variables = NULL,
+                     "mean",
+                     "sd",
+                     "ess_bulk",
+                     "rhat",
+                     q2_5 = q2_5,
+                     q97_5 = q97_5)
+  }
+  smooth_inds <- sum %>% 
+    filter(grepl("mu",variable)) %>% 
+    mutate(yearn = as.integer(str_extract_all(variable,
+                                   "[[:digit:]]{1,}",
+                                   simplify = TRUE)),
+           species_name = species,
+           smooth_ind = mean,
+           smooth_ind_sd = sd,
+           smooth_ind_lci = q2_5,
+           smooth_ind_uci = q97_5) %>% 
+    select(species_name,yearn,smooth_ind,smooth_ind_sd,
+           smooth_ind_lci,smooth_ind_uci) 
+  
+  diffs <- sum %>% 
+    filter(grepl("annual_diffs",variable)) %>% 
+    mutate(yearn = as.integer(str_extract_all(variable,
+                                   "[[:digit:]]{1,}",
+                                   simplify = TRUE)),
+           annual_diff = mean,
+           annual_diff_sd = sd) %>% 
+    select(yearn,annual_diff,annual_diff_sd) 
+  
+  scaled_status <- sum %>% 
+    filter(grepl("scaled_status",variable)) %>% 
+    mutate(yearn = as.integer(str_extract_all(variable,
+                                   "[[:digit:]]{1,}",
+                                   simplify = TRUE)),
+           scaled_status = mean,
+           scaled_status_sd = sd) %>% 
+    select(yearn,scaled_status,scaled_status_sd) 
+  
+  scaled_log_status <- sum %>% 
+    filter(grepl("scaled_log_status",variable)) %>% 
+    mutate(yearn = as.integer(str_extract_all(variable,
+                                   "[[:digit:]]{1,}",
+                                   simplify = TRUE)),
+           scaled_log_status = (mean),
+           scaled_log_status_sd = sd) %>% 
+    select(yearn,scaled_log_status,scaled_log_status_sd) 
+  
+  
+  smooth_inds <- smooth_inds %>% 
+    inner_join(.,diffs,
+               by = c("yearn"))%>% 
+    inner_join(.,scaled_status,
+               by = c("yearn"))%>% 
+    inner_join(.,scaled_log_status,
+               by = c("yearn"))
+  
+  smooth_inds_out <- bind_rows(smooth_inds_out,smooth_inds)
+  
+#   tmp <- grassland_inds %>% 
+#   filter(species_name == species) %>% 
+#     left_join(.,smooth_inds,
+#               by = "yearn")
+#   
+# tst <- ggplot(data = tmp)+
+#   geom_pointrange(aes(x = year, y = ln_index,
+#                       ymin = ln_lci,ymax = ln_uci))+
+#   geom_ribbon(aes(x = year, ymin = smooth_ind_lci,
+#                   ymax = smooth_ind_uci),
+#               alpha = 0.2)+
+#   geom_line(aes(y = smooth_ind,x = year))+
+#   geom_line(aes(x = year, y = annual_diff))+
+#   geom_line(aes(x = year, y = scaled_status))+
+#   geom_line(aes(x = year, y = scaled_log_status))
+# tst
+
+  print(paste(species,"complete"))
+  }else{
+    print(paste(species,"missing data"))
+  }
+  
+
+  }
+
+grassland_inds <- grassland_inds %>% 
+  inner_join(.,smooth_inds_out,
+             by = c("species_name","yearn"))
+saveRDS(grassland_inds,"grassland_smoothed_indices.rds")
+
+   tmp <- grassland_inds 
+   
+ tst <- ggplot(data = tmp)+
+   geom_pointrange(aes(x = year, y = ln_index,
+                       ymin = ln_lci,ymax = ln_uci))+
+   geom_ribbon(aes(x = year, ymin = smooth_ind_lci,
+                   ymax = smooth_ind_uci),
+               alpha = 0.2)+
+   geom_line(aes(y = smooth_ind,x = year),colour = "red")+
+   geom_line(aes(x = year, y = annual_diff))+
+   geom_line(aes(x = year, y = scaled_status), colour = "blue")+
+   geom_line(aes(x = year, y = scaled_log_status))+
+   facet_wrap(vars(species_name),
+              scales = "free_y")
+ tst
+
+```
+
+### Apply the composite models
+
+The standard model estimates each year independently of others, using only the information on the species specific status since the base year.
