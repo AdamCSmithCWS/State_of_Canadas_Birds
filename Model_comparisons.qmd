@@ -231,14 +231,15 @@ saveRDS(grassland_inds,"grassland_smoothed_indices.rds")
    
  tst <- ggplot(data = tmp)+
    geom_pointrange(aes(x = year, y = ln_index,
-                       ymin = ln_lci,ymax = ln_uci))+
+                       ymin = ln_lci,ymax = ln_uci),
+                   size = 0.1)+
    geom_ribbon(aes(x = year, ymin = smooth_ind_lci,
                    ymax = smooth_ind_uci),
                alpha = 0.2)+
    geom_line(aes(y = smooth_ind,x = year),colour = "red")+
-   geom_line(aes(x = year, y = annual_diff))+
-   geom_line(aes(x = year, y = scaled_status), colour = "blue")+
-   geom_line(aes(x = year, y = scaled_log_status))+
+   # geom_line(aes(x = year, y = annual_diff))+
+   # geom_line(aes(x = year, y = scaled_status), colour = "blue")+
+   # geom_line(aes(x = year, y = scaled_log_status))+
    facet_wrap(vars(species_name),
               scales = "free_y")
  tst
