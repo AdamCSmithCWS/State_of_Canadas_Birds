@@ -1,4 +1,4 @@
-//All years estimated independently for State of Birds model
+//Series of yearly differences chained into annual indicator for State of Birds
 
 data {
   int<lower=0> n_years; // number of years of full time-series
@@ -13,44 +13,48 @@ data {
 
 parameters {
   //real<lower=0> sigma;
-  array[n_years] real MU_ann;
-  array[n_years,n_species] real ln_index_true; // inclusion indicator for each species and year (allows missing data)
+  array[n_years] real MU;// mean annual differences
   array[n_years] real<lower=0> sigma;    // sd each yearly summary
-
+  array[n_years,n_species] real noise_raw;
 }
 
+transformed parameters{
+    array[n_years,n_species] real ln_index_true; // true index value for each species and year
+
+    for(i in 1:n_years){
+
+      for(s in 1:n_species){
+
+    ln_index_true[i,s] = MU[i] + sigma[i]*noise_raw[i,s];
+}
+}
+
+}
 model {
-  MU_ann ~ student_t(3,0,1);
+  MU ~ student_t(3,0,1);
 
   for(i in 1:n_years){
-    for(s in species[i,1:n_species_year]){ // stepping through species with data
+ noise_raw[i,] ~ normal(0,1);
+
+   for(s in species[i,1:n_species_year[i]]){ // stepping through species with data
   ln_index[i,s] ~ normal(ln_index_true[i,s], ln_index_sd[i,s]);
-  ln_index_true[i,s] ~ normal(MU_ann[i],sigma[i])
     }
-    for(s in species[i,n_species_year:n_species]){ //stepping through species that are missing
-    ln_index_true[i,s] ~ normal(0,1)
-    }
+    // for(s in species[i,n_species_year[i]:n_species]){ //stepping through species that are missing
+    // ln_index_true[i,s] ~ normal(0,1);
+    // }
   }
 
-  sigma ~ student_t(3,0,1);
+  sigma ~ student_t(3,0,0.1);
 }
 
-// generated quantities {
-// vector[n_years] annual_diffs;
-// vector[n_years] scaled_status;
-// vector[n_years] scaled_log_status;
-//
-// annual_diffs[1] = 0;
-// scaled_status[1] = 0;
-// scaled_log_status[1] = 1;
-//
-//
-// for(y in 2:n_years){
-//   scaled_status[y] = mu[y]-mu[1];
-//   scaled_log_status[y] = exp(mu[y])/exp(mu[1]);
-//   annual_diffs[y] = mu[y]-mu[y-1];
-//
-// }
-//
-//
-// }
+ generated quantities {
+ vector[n_years+1] annual_status;
+
+ annual_status[1] = 0;
+
+
+ for(y in 1:n_years){
+   annual_status[y+1] = annual_status[y]+MU[y];
+
+ }
+}

@@ -15,7 +15,6 @@ data {
 
 
 parameters {
-  //real<lower=0> sigma;
   real MU;
 
   vector[n_knots_year] BETA_raw;//_raw;
@@ -41,8 +40,7 @@ model {
   for(i in 1:n_indices){
   ln_index[year[i]] ~ normal(mu[year[i]], ln_index_sd[year[i]]);
   }
-  //priors
-  //sigma ~ std_normal();
+   //priors
   sdBETA ~ std_normal();
   BETA_raw ~ std_normal();
 }

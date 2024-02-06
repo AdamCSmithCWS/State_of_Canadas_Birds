@@ -67,7 +67,10 @@ grassland_sp <- socb_groups_2019 %>%
 
 grassland_inds <- bbs_canadian_indices %>% 
   filter(species_name %in% grassland_sp,
-         !is.na(index)) %>% 
+         !is.na(index),
+         !((species_code == "AMKE" & year < 1990) |
+             (species_code == "BOBO" & year < 1990) |
+             (species_code == "GRSP" & year > 2010))) %>% 
   mutate(ln_index = log(index),
          ln_lci = log(lower_ci),
          ln_uci = log(upper_ci),
@@ -116,7 +119,8 @@ for(species in grassland_sp){
   
   fit <- mod$sample(data = stan_data,
                     parallel_chains = 4,
-                    refresh = 0)
+                    refresh = 0,
+                    adapt_delta = 0.95)
 
   sum <- fit$summary(variables = NULL,
                      "mean",
@@ -244,3 +248,215 @@ saveRDS(grassland_inds,"grassland_smoothed_indices.rds")
 ### Apply the composite models
 
 The standard model estimates each year independently of others, using only the information on the species specific status since the base year.
+
+```{r}
+grassland_inds <- readRDS("grassland_smoothed_indices.rds")
+
+inds <- grassland_inds %>% 
+  mutate(species_code_fct = factor(species_code),
+         species_ind = as.integer(species_code_fct)) %>% 
+  arrange(yearn,species_id)
+
+
+base_year <- min(inds$year)
+
+inds <- inds %>% 
+  group_by(species_ind) %>% 
+  mutate(yearn2 = year-base_year) %>% 
+  filter(yearn2 > 0,
+         scaled_log_status_sd > 0,
+         scaled_status_sd > 0,
+         annual_diff_sd > 0)
+
+
+sp_y <- inds %>% 
+  group_by(species_id,species_code,species_ind) %>% 
+  summarise(first_year = min(year),
+            last_year = max(year),
+            first_yearn2 = min(yearn2),
+            last_yearn2 = max(yearn2),
+            .groups = "drop") %>% 
+  mutate()
+
+n_years <- max(inds$yearn2,na.rm = TRUE)
+n_species <- max(inds$species_ind,na.rm = TRUE)
+
+species <- matrix(data = NA,
+                  nrow = n_years,
+                  ncol = n_species)
+ln_index <- matrix(data = 0,
+                  nrow = n_years,
+                  ncol = n_species)
+ln_index_sd <- matrix(data = 99,
+                  nrow = n_years,
+                  ncol = n_species)
+n_species_year <- vector("integer",length = n_years)
+for(y in 1:n_years){
+  tmp <- inds %>% 
+    filter(yearn2 == y) %>% 
+    arrange(species_id)
+  n_sp <- nrow(tmp)
+  sp_inc <- as.integer(tmp$species_ind)
+  species[y,1:n_sp] <- sp_inc
+  if(n_sp < n_species){
+    sp_miss <- c(1:n_species)[-sp_inc]
+  species[y,c((n_sp+1):n_species)] <- sp_miss
+  }
+    n_species_year[y] <- n_sp
+  for(s in sp_inc){
+  ln_index[y,s] <- as.numeric(tmp[which(tmp$species_ind == s & tmp$yearn2 == y),"scaled_status"]) 
+    ln_index_sd[y,s] <- as.numeric(tmp[which(tmp$species_ind == s & tmp$yearn2 == y),"scaled_status_sd"]) 
+  }
+}
+
+stan_data <- list(n_years = n_years,
+                  n_species = n_species,
+                  n_species_year = n_species_year,
+                  species = species,
+                  ln_index = ln_index,
+                  ln_index_sd = ln_index_sd)
+
+
+ file <- "models/State_of_Birds_Model_standard.stan"
+  mod <- cmdstan_model(file)
+  
+  fit <- mod$sample(data = stan_data,
+                    parallel_chains = 4,
+                    refresh = 0,
+                    adapt_delta = 0.8)
+
+  sum <- fit$summary(variables = NULL,
+                     "mean",
+                     "sd",
+                     "ess_bulk",
+                     "rhat",
+                     q2_5 = q2_5,
+                     q97_5 = q97_5)
+  
+  mx_rhat <- max(sum$rhat,na.rm = TRUE)
+  if(mx_rhat > 1.05){
+      fit <- mod$sample(data = stan_data,
+                    parallel_chains = 4,
+                    iter_warmup = 8000,
+                    iter_sampling = 8000,
+                    thin = 8,
+                    refresh = 0)
+  sum <- fit$summary(variables = NULL,
+                     "mean",
+                     "sd",
+                     "ess_bulk",
+                     "rhat",
+                     q2_5 = q2_5,
+                     q97_5 = q97_5)
+  }
+ 
+  annual_status_standard <- sum %>% 
+    filter(grepl("annual_status",variable)) %>% 
+    mutate(yearn2 = as.integer(str_extract_all(variable,
+                                   "[[:digit:]]{1,}",
+                                   simplify = TRUE)),
+           model = "standard")
+
+  
+```
+
+### Apply the differences model
+
+```{r}
+species <- matrix(data = NA,
+                  nrow = n_years,
+                  ncol = n_species)
+ln_index <- matrix(data = 0,
+                  nrow = n_years,
+                  ncol = n_species)
+ln_index_sd <- matrix(data = 0,
+                  nrow = n_years,
+                  ncol = n_species)
+n_species_year <- vector("integer",length = n_years)
+for(y in 1:n_years){
+  tmp <- inds %>% 
+    filter(yearn2 == y) %>% 
+    arrange(species_id)
+  n_sp <- nrow(tmp)
+  sp_inc <- as.integer(tmp$species_ind)
+  species[y,1:n_sp] <- sp_inc
+  if(n_sp < n_species){
+    sp_miss <- c(1:n_species)[-sp_inc]
+  species[y,c((n_sp+1):n_species)] <- sp_miss
+  }
+    n_species_year[y] <- n_sp
+  for(s in sp_inc){
+  ln_index[y,s] <- as.numeric(tmp[which(tmp$species_ind == s & tmp$yearn2 == y),"annual_diff"]) 
+    ln_index_sd[y,s] <- as.numeric(tmp[which(tmp$species_ind == s & tmp$yearn2 == y),"annual_diff_sd"]) 
+  }
+}
+
+stan_data2 <- list(n_years = n_years,
+                  n_species = n_species,
+                  n_species_year = n_species_year,
+                  species = species,
+                  ln_index = ln_index,
+                  ln_index_sd = ln_index_sd)
+
+
+ file2 <- "models/State_of_Birds_Model_differences.stan"
+  mod2 <- cmdstan_model(file2)
+  
+  fit2 <- mod2$sample(data = stan_data2,
+                    parallel_chains = 4,
+                    refresh = 0,
+                    adapt_delta = 0.8)
+
+  sum2 <- fit2$summary(variables = NULL,
+                     "mean",
+                     "sd",
+                     "ess_bulk",
+                     "rhat",
+                     q2_5 = q2_5,
+                     q97_5 = q97_5)
+  
+  mx_rhat2 <- max(sum2$rhat,na.rm = TRUE)
+  if(mx_rhat > 1.05){
+      fit2 <- mod$sample(data = stan_data2,
+                    parallel_chains = 4,
+                    iter_warmup = 8000,
+                    iter_sampling = 8000,
+                    thin = 8,
+                    refresh = 0)
+  sum2 <- fit2$summary(variables = NULL,
+                     "mean",
+                     "sd",
+                     "ess_bulk",
+                     "rhat",
+                     q2_5 = q2_5,
+                     q97_5 = q97_5)
+  }
+ 
+  annual_status_difference <- sum2 %>% 
+    filter(grepl("annual_status",variable)) %>% 
+    mutate(yearn2 = as.integer(str_extract_all(variable,
+                                   "[[:digit:]]{1,}",
+                                   simplify = TRUE)),
+           model = "difference")
+
+```
+
+### Compare model outputs
+
+```{r}
+
+annual_status_compare <- annual_status_difference %>% 
+    bind_rows(.,annual_status_standard)
+
+tst <- ggplot(data = annual_status_compare)+
+  geom_ribbon(aes(x = yearn2,y = mean,
+                ymin = q2_5,ymax = q97_5,
+                  fill = model),
+              alpha = 0.3)+
+  geom_line(aes(x = yearn2,y = mean,
+                colour = model))+
+  scale_y_continuous(trans = "exp")+
+  scale_colour_viridis_d(aesthetics = c("colour","fill"))
+
+tst
+```
