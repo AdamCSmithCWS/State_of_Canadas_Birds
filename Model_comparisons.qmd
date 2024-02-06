@@ -252,6 +252,24 @@ The standard model estimates each year independently of others, using only the i
 ```{r}
 grassland_inds <- readRDS("grassland_smoothed_indices.rds")
 
+#comps <- grassland_inds %>% 
+#  group_by(species_code) %>% 
+#  summarise(sum_diffs = sum(annual_diff,na.rm = TRUE))
+#fy <- grassland_inds %>% 
+#  group_by(species_code) %>% 
+#  summarise(year = max(year)) %>% 
+#  inner_join(.,grassland_inds,
+#            by = c("species_code","year")) %>% 
+#  select(species_code,year,scaled_status) %>% 
+#  inner_join(.,comps,
+#             by = c("species_code"))
+#tst <- ggplot(data = fy,
+#              aes(x = scaled_status,y = sum_diffs))+
+#  geom_point()
+# tst
+## confirming that sum of the annual differences is equivalent to the 
+## final year of the scaled status
+
 inds <- grassland_inds %>% 
   mutate(species_code_fct = factor(species_code),
          species_ind = as.integer(species_code_fct)) %>% 
@@ -438,6 +456,11 @@ stan_data2 <- list(n_years = n_years,
                                    "[[:digit:]]{1,}",
                                    simplify = TRUE)),
            model = "difference")
+  
+  sigma1 <- sum %>% 
+    filter(grepl("sigma",variable))
+  sigma2 <- sum2 %>% 
+    filter(grepl("sigma",variable))
 
 ```
 
@@ -460,3 +483,7 @@ tst <- ggplot(data = annual_status_compare)+
 
 tst
 ```
+
+The standard model and the cumulative difference model generate essentially equivalent mean trajectories. There are some differences in the way they handle missing data. For example the small step-change in year 21 in the standard model results above reflects the addition of the two species with missing data until 1990. This step-change is undesirable because the input data for these species in the standard model represent the change from 1990, instead of 1970 (i.e., in 1991, these species' input data reflect change over only 1 year, and so pull the mean indicator value back towards 0). In the cumulative difference model, there is no abrupt step-change because these species' input data in 1991 reflect the same metric as all other species: the change since 1990.
+
+The treatment of uncertainty is worth revisiting for these models. Similarly, the entire assessment could be combined into a single hierarchical GAM, where the input data are the species annual indices and their sd. A model with species-level intercepts, hierarchical smooths for each species, and a global mean smooth, should generate the same overall mean trajectory. This treatment could more easily propagate the uncertainty, and could generate smoothed species-level trajectories as well as explicit predictions for a hypothetical "new" species (or a species with missing data). This approach would also very simply accommodate missing data.
