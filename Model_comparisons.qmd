@@ -13,14 +13,6 @@ execute:
 
 To compare alternative models for estimating the composite species indicators used in the State of Canada's Birds, i.e., the "Summary Models" for the State of Canada's Birds. These indicators are intended to represent the mean status of species within a group through time; e.g., the mean overall change in grassland bird populations since 1970, for all years from 1970 through the present.
 
-## Summary Models
-
-There are two conceptual models to compare here:
-
-1.  Standard model - estimating the mean annual status of each species in each year. Data are the log-scaled, indices of annual status relative to a base-year (usually 1970) for each species and the model is fit independently in each year.
-
-2.  Differences model - estimating the time-series of the mean composite indicator by fixing the value of the first year (e.g., fixed at 0), then estimating the indicator in year t+1 as year 1 plus the mean of all species differences from the first year. Data are the time series of log-scale annual differences for each species.
-
 ```{r}
 library(tidyverse)
 library(cmdstanr)
@@ -30,6 +22,8 @@ source("functions/GAM_basis_function_mgcv.R")
     q97_5 <- function(x)c(q97_5 = quantile(x,probs = c(0.975),
                                        names = FALSE))
     
+    base_year <- 1970
+
 ```
 
 ## Conceptual steps
@@ -40,7 +34,11 @@ The modeling effort needs to start with estimated population trajectories for ea
 
 Here, just using output from the BBS as an example.
 
-```{r, eval=FALSE}
+```{r}
+#| eval: false
+#| echo: true
+
+
 all_bbs_inds <- read_csv("c:/github/CWS_2022_BBS_Analyses/website/BBS_2022_annual_indices_for_socb.csv") %>% 
   filter(area_name == "Canada",
          period == "Long-term") 
@@ -49,10 +47,9 @@ saveRDS(all_bbs_inds,"data/Canadian_BBS_indices.rds")
 
 ```
 
-Selecting out the grassland bird annual indices of abundance from the BBS. Then log-transforming the index values and calculating a log-scale standard error of the indices by transforming the credible limits and approximating the standard error as the credible interval width divided by 3.9 (assuming an approximately normal 95 percent CI).
-
 ```{r}
-#|echo: true
+#|echo: false
+#|eval: false
 #|
 bbs_canadian_indices <- readRDS("data/Canadian_BBS_indices.rds")
 socb_groups_2019 <- read_csv("data/SOCB Data Sources_Source de donnees EPOC.csv")
@@ -65,28 +62,72 @@ grassland_sp <- socb_groups_2019 %>%
   select(english) %>% 
   unlist()
 
+```
+
+Selecting out the grassland bird annual indices of abundance from the BBS. Then log-transforming the index values and calculating a log-scale standard error of the indices by transforming the credible limits and approximating the standard error as the credible interval width divided by 3.9 (assuming an approximately normal 95 percent CI).
+
+#### Constant number of species
+
+The code below generates the input data for the smoothing model and the *Constant* scenario, where the number of species in the indicator is constant across all years because each species has data in all years.
+
+```{r}
+#| echo: true
+
 grassland_inds <- bbs_canadian_indices %>% 
   filter(species_name %in% grassland_sp,
-         !is.na(index),
-         !((species_code == "AMKE" & year < 1990) |
-             (species_code == "BOBO" & year < 1990) |
-             (species_code == "GRSP" & year > 2010))) %>% 
+         !is.na(index)) %>% 
   mutate(ln_index = log(index),
          ln_lci = log(lower_ci),
          ln_uci = log(upper_ci),
          ln_index_sd = (ln_uci-ln_lci)/3.9) %>% 
   group_by(species_name) %>% 
-    mutate(yearn = year-(min(year)-1)) %>% 
+    mutate(yearn = year-(min(year)-1)) %>% # sets a yearn value specific to each species
   arrange(species_name,year)
+
+saveRDS(grassland_inds,"data/grassland_inds.rds")
+```
+
+#### Variable number of species
+
+To demonstrate how each model handles missing data, we can create an identical dataset where five of the species do not have monitoring data across the entire time-series. The code below removes the first 20-years of data for five of the species in the grassland birds indicator. These data form the raw data for the *Variable* graph facet in Figure 1.
+
+```{r}
+#| echo: true
+
+grassland_inds <- bbs_canadian_indices %>% 
+  filter(species_name %in% grassland_sp,
+         !is.na(index),
+         !((species_code == "AMKE" & year < 1990) |
+             (species_code == "BOBO" & year < 1990) |
+             (species_code == "CCLO" & year < 1990) |
+             (species_code == "VESP" & year < 1990) |
+             (species_code == "GRSP" & year < 1990))) %>% 
+  mutate(ln_index = log(index),
+         ln_lci = log(lower_ci),
+         ln_uci = log(upper_ci),
+         ln_index_sd = (ln_uci-ln_lci)/3.9) %>% 
+  group_by(species_name) %>% 
+    mutate(yearn = year-(min(year)-1)) %>% # sets a yearn value specific to each species
+  arrange(species_name,year)
+
+saveRDS(grassland_inds,"data/grassland_inds_w_missing.rds")
+
 
 ```
 
 ### Smooth indices accounting for uncertainty
 
-We want the composite indicators to track long- and medium-term changes in populations that are shared across many species in a group. Given that inferential goal, we want the species-level indices to represent only those medium- and long-term changes. Sharp annual fluctuations may represent true variation in the species' population, but they can mask the longer term changes that are primary interest of this high-level summary. Following previous State of Canada's Birds reports, we use a generalized additive model (GAM) that accounts for the uncertainty of each estimated annual index of abundance with a measurement-error structure.
+We want the composite indicators to track long- and medium-term changes in populations that are shared across many species in a group. Sharp annual fluctuations may represent true variation in the species' population, but they can mask the longer term changes that are primary interest of this high-level summary. Following previous State of Canada's Birds reports, we use a generalized additive model (GAM) that accounts for the uncertainty of each estimated annual index of abundance with a measurement-error structure. Fitting this GAM for each species generates smooth population trajectories. Within the GAM, we can estimate the log-scale input data for the two composite summary models. The code is not shown here, but the process involves log-transforming the annual indices of abundance for each species and year, then fitting the smooth GAM to each species separately, and then calculating the input data representing the change since the species first year of data for the standard model and the series of annual differences to generate the input data
 
 ```{r}
+#| eval: false
 
+for(j in c(1,2)){
+  if(j == 1){
+grassland_inds <- readRDS("data/grassland_inds_w_missing.rds")
+  }else{
+ grassland_inds <- readRDS("data/grassland_inds.rds")
+}
 smooth_inds_out <- NULL
 for(species in grassland_sp){
   
@@ -197,23 +238,6 @@ for(species in grassland_sp){
   
   smooth_inds_out <- bind_rows(smooth_inds_out,smooth_inds)
   
-#   tmp <- grassland_inds %>% 
-#   filter(species_name == species) %>% 
-#     left_join(.,smooth_inds,
-#               by = "yearn")
-#   
-# tst <- ggplot(data = tmp)+
-#   geom_pointrange(aes(x = year, y = ln_index,
-#                       ymin = ln_lci,ymax = ln_uci))+
-#   geom_ribbon(aes(x = year, ymin = smooth_ind_lci,
-#                   ymax = smooth_ind_uci),
-#               alpha = 0.2)+
-#   geom_line(aes(y = smooth_ind,x = year))+
-#   geom_line(aes(x = year, y = annual_diff))+
-#   geom_line(aes(x = year, y = scaled_status))+
-#   geom_line(aes(x = year, y = scaled_log_status))
-# tst
-
   print(paste(species,"complete"))
   }else{
     print(paste(species,"missing data"))
@@ -225,10 +249,16 @@ for(species in grassland_sp){
 grassland_inds <- grassland_inds %>% 
   inner_join(.,smooth_inds_out,
              by = c("species_name","yearn"))
-saveRDS(grassland_inds,"grassland_smoothed_indices.rds")
 
-   tmp <- grassland_inds 
-   
+if(j == 1){
+saveRDS(grassland_inds,"grassland_smoothed_indices_w_missing.rds")
+}else{
+ saveRDS(grassland_inds,"grassland_smoothed_indices.rds")
+}
+
+}
+   tmp <- grassland_inds
+
  tst <- ggplot(data = tmp)+
    geom_pointrange(aes(x = year, y = ln_index,
                        ymin = ln_lci,ymax = ln_uci),
@@ -246,30 +276,23 @@ saveRDS(grassland_inds,"grassland_smoothed_indices.rds")
 
 ```
 
-### Apply the composite models
+## Apply the composite summary models
 
-The standard model estimates each year independently of others, using only the information on the species specific status since the base year.
+There are two conceptual models to compare here:
+
+### Standard model
+
+The Standard model has been used in previous SoCB reports and estimates the annual values of the mean change since the first year of data across species. Data are the log-scaled indices of annual status relative to a base-year (usually 1970) for each species. The model estimates the mean change since the base-year across all species, and independently in each year.
 
 ```{r}
-grassland_inds <- readRDS("grassland_smoothed_indices.rds")
+#| eval: false
 
-#comps <- grassland_inds %>% 
-#  group_by(species_code) %>% 
-#  summarise(sum_diffs = sum(annual_diff,na.rm = TRUE))
-#fy <- grassland_inds %>% 
-#  group_by(species_code) %>% 
-#  summarise(year = max(year)) %>% 
-#  inner_join(.,grassland_inds,
-#            by = c("species_code","year")) %>% 
-#  select(species_code,year,scaled_status) %>% 
-#  inner_join(.,comps,
-#             by = c("species_code"))
-#tst <- ggplot(data = fy,
-#              aes(x = scaled_status,y = sum_diffs))+
-#  geom_point()
-# tst
-## confirming that sum of the annual differences is equivalent to the 
-## final year of the scaled status
+for(j in c(1,2)){
+  if(j == 1){
+grassland_inds <- readRDS("grassland_smoothed_indices_w_missing.rds")
+}else{
+grassland_inds <- readRDS("grassland_smoothed_indices.rds")
+}
 
 inds <- grassland_inds %>% 
   mutate(species_code_fct = factor(species_code),
@@ -279,6 +302,7 @@ inds <- grassland_inds %>%
 
 base_year <- min(inds$year)
 
+### Drop the base-year values
 inds <- inds %>% 
   group_by(species_ind) %>% 
   mutate(yearn2 = year-base_year) %>% 
@@ -287,7 +311,7 @@ inds <- inds %>%
          scaled_status_sd > 0,
          annual_diff_sd > 0)
 
-
+## track the start and end years for each species
 sp_y <- inds %>% 
   group_by(species_id,species_code,species_ind) %>% 
   summarise(first_year = min(year),
@@ -297,19 +321,29 @@ sp_y <- inds %>%
             .groups = "drop") %>% 
   mutate()
 
+# number of years and species
 n_years <- max(inds$yearn2,na.rm = TRUE)
 n_species <- max(inds$species_ind,na.rm = TRUE)
 
+
+## set-up the empty data matrices and vectors for the Stan model
+
+# list of species indicators included in each year
 species <- matrix(data = NA,
                   nrow = n_years,
-                  ncol = n_species)
+                  ncol = n_species) 
+# matrix of index values for each year by species
 ln_index <- matrix(data = 0,
                   nrow = n_years,
                   ncol = n_species)
-ln_index_sd <- matrix(data = 99,
+# matrix of index SE values for each year by species
+ln_index_sd <- matrix(data = 99, # large, non-zero value - ignored by model
                   nrow = n_years,
                   ncol = n_species)
+# number of species with data in each year
 n_species_year <- vector("integer",length = n_years)
+
+## fill the data matrices and vectors
 for(y in 1:n_years){
   tmp <- inds %>% 
     filter(yearn2 == y) %>% 
@@ -336,6 +370,7 @@ stan_data <- list(n_years = n_years,
                   ln_index_sd = ln_index_sd)
 
 
+## fit Standard Stan model
  file <- "models/State_of_Birds_Model_standard.stan"
   mod <- cmdstan_model(file)
   
@@ -353,7 +388,7 @@ stan_data <- list(n_years = n_years,
                      q97_5 = q97_5)
   
   mx_rhat <- max(sum$rhat,na.rm = TRUE)
-  if(mx_rhat > 1.05){
+  if(mx_rhat > 1.05){ # if not converged run again with more iterations
       fit <- mod$sample(data = stan_data,
                     parallel_chains = 4,
                     iter_warmup = 8000,
@@ -375,13 +410,65 @@ stan_data <- list(n_years = n_years,
                                    "[[:digit:]]{1,}",
                                    simplify = TRUE)),
            model = "standard")
-
+  
+  if(j == 1){
+  saveRDS(annual_status_standard,"output/annual_status_standard_w_missing.rds") }else{
+  saveRDS(annual_status_standard,"output/annual_status_standard.rds")    
+  }
+  
+}
+  
+ 
   
 ```
 
-### Apply the differences model
+### The differences model
+
+The Difference model estimates the cumulative change over time by estimating the annual mean difference from the previous year across species, and then summing those annual mean differences through time. Data are the time series of log-scale annual differences for each species; i.e., the difference between the species' index in year(t) minus the index in year(t-1). The model estimates the mean across all species of those annual differences for each year, and then estimates the time-series of the mean composite indicator by fixing the value of the first year at 0, then summing the mean annual differences through time.
 
 ```{r}
+#| eval: false
+#| 
+  ##### fit same model to data without missing species
+  for(j in c(1,2)){
+  if(j == 1){
+grassland_inds <- readRDS("grassland_smoothed_indices_w_missing.rds")
+}else{
+grassland_inds <- readRDS("grassland_smoothed_indices.rds")
+}
+
+inds <- grassland_inds %>% 
+  mutate(species_code_fct = factor(species_code),
+         species_ind = as.integer(species_code_fct)) %>% 
+  arrange(yearn,species_id)
+
+
+base_year <- min(inds$year)
+
+### Drop the base-year values
+inds <- inds %>% 
+  group_by(species_ind) %>% 
+  mutate(yearn2 = year-base_year) %>% 
+  filter(yearn2 > 0,
+         scaled_log_status_sd > 0,
+         scaled_status_sd > 0,
+         annual_diff_sd > 0)
+
+## track the start and end years for each species
+sp_y <- inds %>% 
+  group_by(species_id,species_code,species_ind) %>% 
+  summarise(first_year = min(year),
+            last_year = max(year),
+            first_yearn2 = min(yearn2),
+            last_yearn2 = max(yearn2),
+            .groups = "drop") %>% 
+  mutate()
+
+# number of years and species
+n_years <- max(inds$yearn2,na.rm = TRUE)
+n_species <- max(inds$species_ind,na.rm = TRUE)
+
+
 species <- matrix(data = NA,
                   nrow = n_years,
                   ncol = n_species)
@@ -462,29 +549,67 @@ stan_data2 <- list(n_years = n_years,
     filter(grepl("sigma",variable))
   sigma2 <- sum2 %>% 
     filter(grepl("sigma",variable))
+  
+  if(j == 1){
+  saveRDS(annual_status_difference,"output/annual_status_difference_w_missing.rds")
+  }else{
+   saveRDS(annual_status_difference,"output/annual_status_difference.rds")   
+  }
+
+  
+  }
 
 ```
 
 ### Compare model outputs
 
 ```{r}
+#| fig-cap: "Comparison of two model for calculating the composite group indicator trajectories for State of Canada's Birds (SoCB). The facet on the left demonstrates that the models generate very similar mean trajectories when all species have data in all years. The facet on the right demonstrates the effect having a variable number of species through time. In the right facet, the data for five species from the first 20 years have been removed, and so their data enter the model in 1991"
+
+
+brks_pch <- c(-95,-90,-75,-50,-25,0,25,50,100,200,300,500)
+brks_log <- log((brks_pch/100)+1)
+brks_labs <- paste0(brks_pch,"%")
+
+annual_status_difference <- readRDS("output/annual_status_difference.rds") %>% 
+  mutate(model = "Difference",
+         n_species = "Constant")
+annual_status_difference_miss <- readRDS("output/annual_status_difference_w_missing.rds")%>% 
+  mutate(model = "Difference",
+         n_species = "Variable")
+
+annual_status_standard <- readRDS("output/annual_status_standard.rds")%>% 
+  mutate(model = "Standard",
+         n_species = "Constant")
+annual_status_standard_miss <- readRDS("output/annual_status_standard_w_missing.rds")%>% 
+  mutate(model = "Standard",
+         n_species = "Variable")
+
 
 annual_status_compare <- annual_status_difference %>% 
-    bind_rows(.,annual_status_standard)
+    bind_rows(.,annual_status_standard) %>% 
+  bind_rows(.,annual_status_difference_miss) %>% 
+  bind_rows(.,annual_status_standard_miss) %>% 
+  mutate(year = yearn2 + (base_year),
+         percent_diff = (exp(mean)-1)*100,
+         percent_diff_lci = (exp(q2_5)-1)*100,
+         percent_diff_uci = (exp(q97_5)-1)*100)
 
 tst <- ggplot(data = annual_status_compare)+
-  geom_ribbon(aes(x = yearn2,y = mean,
+  geom_ribbon(aes(x = year,y = mean,
                 ymin = q2_5,ymax = q97_5,
                   fill = model),
               alpha = 0.3)+
-  geom_line(aes(x = yearn2,y = mean,
+  geom_line(aes(x = year,y = mean,
                 colour = model))+
-  scale_y_continuous(trans = "exp")+
-  scale_colour_viridis_d(aesthetics = c("colour","fill"))
+  scale_y_continuous(breaks = brks_log,
+                     labels = brks_labs)+
+  scale_colour_viridis_d(aesthetics = c("colour","fill"))+
+  facet_wrap(vars(n_species))
 
 tst
 ```
 
-The standard model and the cumulative difference model generate essentially equivalent mean trajectories. There are some differences in the way they handle missing data. For example the small step-change in year 21 in the standard model results above reflects the addition of the two species with missing data until 1990. This step-change is undesirable because the input data for these species in the standard model represent the change from 1990, instead of 1970 (i.e., in 1991, these species' input data reflect change over only 1 year, and so pull the mean indicator value back towards 0). In the cumulative difference model, there is no abrupt step-change because these species' input data in 1991 reflect the same metric as all other species: the change since 1990.
+The standard model and the cumulative difference model generate very similar mean trajectories when the number of species is constant across all years (left panel, Figure 1). By contrast, the step-change in year 21 in the standard model results when the number of species varies through time (right panel, Figure 1) reflects the addition of the five species with missing data until 1990. Because these species have no data from before 1990, it is not possible to estimate a change since 1970. As a result, data for these five species represent the change since 1990 (i.e., in 1991, these species' input data reflect change over only 1 year, and so pull the mean indicator value back towards 0). In the cumulative difference model, there is no abrupt step-change because these species' input data in 1991 reflect the same metric as all other species: the change since 1990.
 
-The treatment of uncertainty is worth revisiting for these models. Similarly, the entire assessment could be combined into a single hierarchical GAM, where the input data are the species annual indices and their sd. A model with species-level intercepts, hierarchical smooths for each species, and a global mean smooth, should generate the same overall mean trajectory. This treatment could more easily propagate the uncertainty, and could generate smoothed species-level trajectories as well as explicit predictions for a hypothetical "new" species (or a species with missing data). This approach would also very simply accommodate missing data.
+The treatment of uncertainty is worth revisiting for these models, as they clearly estimate different aspects of the uncertainty. On a related note, the entire assessment could be combined into a single hierarchical GAM, where the input data are the species annual indices and their SE. A model with species-level intercepts, hierarchical smooths for each species, and a global mean smooth, should generate the same overall mean trajectory. This treatment could more easily propagate the uncertainty, and could generate smoothed species-level trajectories as well as explicit predictions for a hypothetical "new" species (or a species with missing data).

@@ -19,6 +19,8 @@ parameters {
 
   vector[n_knots_year] BETA_raw;//_raw;
   real<lower=0> sdBETA;    // sd of GAM coefficients
+  real<lower=0> sigma;//
+  vector[n_years] noise_raw;
 
 }
 
@@ -26,23 +28,27 @@ transformed parameters {
   vector[n_years] smooth_pred;
   vector[n_knots_year] BETA;
   vector[n_years] mu; // vector of true annual indices after accounting for uncertainty
+  vector[n_years] noise;
 
 
   BETA = sdBETA*BETA_raw;
+  noise = noise_raw*sigma;
 
   smooth_pred = year_basis * BETA;
-  mu = MU + smooth_pred;
+  mu = MU + smooth_pred + noise;
 
 }
 
 model {
   MU ~ student_t(3,0,2);
   for(i in 1:n_indices){
-  ln_index[year[i]] ~ normal(mu[year[i]], ln_index_sd[year[i]]);
+  ln_index[i] ~ normal(mu[year[i]], ln_index_sd[i]);
   }
    //priors
   sdBETA ~ std_normal();
   BETA_raw ~ std_normal();
+  noise_raw ~ std_normal();
+  sigma ~ normal(0,0.1);
 }
 
 generated quantities {
