@@ -4,6 +4,7 @@ library(tidyverse)
 library(cmdstanr)
 library(readxl)
 library(naturecounts)
+library(patchwork)
 
 source("functions/GAM_basis_function_mgcv.R")
 
@@ -130,28 +131,6 @@ miss_inds <- all_inds %>%
 all_inds <- all_inds %>%
   filter(index > 0, indexLowerCI >= 0)
 
-# Load required data ------------------------------------------------------
-
-my_custom_name_repair <- function(nms){
-  nc <- tolower(str_replace_all( pattern = "[[:punct:]]+",replacement = "", nms))
-  nc <- str_replace_all( pattern = "[\r\n]",replacement = "", nc)
-  nc <- str_replace_all( pattern = "[[:blank:]]+",replacement = "_", nc)
-}
-
-species_groups <- read_xlsx("data/SoCB species guild associations Feb2024.xlsx",
-                            .name_repair = my_custom_name_repair)
-
-groups_to_fit <- species_groups %>%
-  select(waterfowl:all_other_birds_tous_les_autres_oiseaux) %>%
-  names()
-
-# remove non-native and range expansion species
-species_to_fit <- species_groups %>%
-  filter(!is.na(regularly_occurring_native_species_included_in_analyses),
-         is.na(species_whose_range_expanded_into_canada_since_1970_excluded_from_indicators)) %>%
-  rename(speciesId = speciesid)
-
-
 # Generate species-level smooths ------------------------------------------
 
 
@@ -233,7 +212,7 @@ for(species in all_sp){
                        q97_5 = q97_5)
   }
   smooth_inds <- sum %>%
-    filter(grepl("mu",variable)) %>%
+    filter(grepl("mu_smooth",variable)) %>%
     mutate(yearn = as.integer(str_extract_all(variable,
                                               "[[:digit:]]{1,}",
                                               simplify = TRUE)),
@@ -284,6 +263,11 @@ for(species in all_sp){
 
   all_smoothed_indices <- bind_rows(all_smoothed_indices,smooth_inds)
 
+  tst <- ggplot(data = smooth_inds,
+                aes(x = year, y = annual_diff))+
+    geom_line()
+  tst
+
   print(paste(species,"complete",round(which(all_sp == species)/length(all_sp),2)))
 
 }
@@ -296,24 +280,78 @@ saveRDS(all_smoothed_indices,"socb_smoothed_indices.rds")
 all_smoothed_indices <- readRDS("socb_smoothed_indices.rds")
 
 
-### Drop the base-year values
-inds <- inds %>%
-  group_by(species_ind) %>%
+
+
+# Group-level models ------------------------------------------------------
+
+my_custom_name_repair <- function(nms){
+  nc <- tolower(str_replace_all( pattern = "[[:punct:]]+",replacement = "", nms))
+  nc <- str_replace_all( pattern = "[\r\n]",replacement = "", nc)
+  nc <- str_replace_all( pattern = "[[:blank:]]+",replacement = "_", nc)
+}
+
+species_groups <- read_xlsx("data/SoCB species guild associations Feb2024.xlsx",
+                            .name_repair = my_custom_name_repair)
+
+groups_to_fit <- species_groups %>%
+  select(waterfowl:all_other_birds_tous_les_autres_oiseaux) %>%
+  names()
+
+# remove non-native and range expansion species
+species_to_fit <- species_groups %>%
+  rename(speciesId = speciesid) %>%
+  mutate(speciesId = as.integer(speciesId)) %>%
+  filter(!is.na(regularly_occurring_native_species_included_in_analyses),
+         is.na(species_whose_range_expanded_into_canada_since_1970_excluded_from_indicators),
+         !is.na(speciesId))
+
+
+
+# Group loop --------------------------------------------------------------
+
+pdf("figures/composite_summary_plots.pdf",
+    width = 8.5,
+    height = 11)
+for(grp in groups_to_fit){
+
+  species_sel <- species_to_fit[which(!is.na(species_to_fit[,grp])),c("speciesId",
+                                                                      "english_name",grp)]
+
+  if(nrow(species_sel) == 0){next}
+
+  n_sp_w_data <- length(which(species_sel$speciesId %in% all_smoothed_indices$speciesId))
+
+  print(paste("There are data for",n_sp_w_data,"of",nrow(species_sel),
+              "in the",grp,"group"))
+
+if(n_sp_w_data/nrow(species_sel) < 0.5){
+  print(paste("Skipping",grp,"because only",round(n_sp_w_data/nrow(species_sel),2)*100,"% of species have data"))
+    next}
+  ### Drop the base-year values and other species
+inds_all <- all_smoothed_indices %>%
+  inner_join(.,species_sel,
+             by = "speciesId") %>%
+  mutate(species_ind = as.integer(factor(speciesId)))#
+
+base_yr <- max(base_year,min(inds_all$year))
+
+inds <- inds_all %>%
+  group_by(speciesId,species_ind) %>%
   mutate(yearn2 = year-base_year) %>%
   filter(yearn2 > 0,
          scaled_log_status_sd > 0,
          scaled_status_sd > 0,
-         annual_diff_sd > 0)
+         annual_diff_sd > 0) %>%
+  arrange(species_ind,yearn2)
 
 ## track the start and end years for each species
 sp_y <- inds %>%
-  group_by(species_id,speciesId,species_ind) %>%
+  group_by(species_ind,speciesId) %>%
   summarise(first_year = min(year),
             last_year = max(year),
             first_yearn2 = min(yearn2),
             last_yearn2 = max(yearn2),
-            .groups = "drop") %>%
-  mutate()
+            .groups = "drop")
 
 # number of years and species
 n_years <- max(inds$yearn2,na.rm = TRUE)
@@ -333,7 +371,7 @@ n_species_year <- vector("integer",length = n_years)
 for(y in 1:n_years){
   tmp <- inds %>%
     filter(yearn2 == y) %>%
-    arrange(species_id)
+    arrange(species_ind)
   n_sp <- nrow(tmp)
   sp_inc <- as.integer(tmp$species_ind)
   species[y,1:n_sp] <- sp_inc
@@ -373,7 +411,7 @@ sum2 <- fit2$summary(variables = NULL,
                      q97_5 = q97_5)
 
 mx_rhat2 <- max(sum2$rhat,na.rm = TRUE)
-if(mx_rhat > 1.05){
+if(mx_rhat2 > 1.05){
   fit2 <- mod$sample(data = stan_data2,
                      parallel_chains = 4,
                      iter_warmup = 8000,
@@ -394,15 +432,164 @@ annual_status_difference <- sum2 %>%
   mutate(yearn2 = as.integer(str_extract_all(variable,
                                              "[[:digit:]]{1,}",
                                              simplify = TRUE)),
-         model = "difference")
+         model = "difference",
+         year = yearn2+(base_yr-1),
+         percent_diff = (exp(mean)-1)*100,
+         percent_diff_lci = (exp(q2_5)-1)*100,
+         percent_diff_uci = (exp(q97_5)-1)*100)
 
 sigma1 <- sum %>%
   filter(grepl("sigma",variable))
 sigma2 <- sum2 %>%
   filter(grepl("sigma",variable))
 
-  saveRDS(annual_status_difference,"output/annual_status_difference.rds")
+  saveRDS(annual_status_difference,paste0("output/composite_fit_",grp,".rds"))
+  saveRDS(inds_all,paste0("output/composite_data_",grp,".rds"))
 
+
+# alternate original model ------------------------------------------------
+
+
+
+
+  ## fill the data matrices and vectors
+  for(y in 1:n_years){
+    tmp <- inds %>%
+      filter(yearn2 == y) %>%
+      arrange(species_ind)
+    n_sp <- nrow(tmp)
+    sp_inc <- as.integer(tmp$species_ind)
+    species[y,1:n_sp] <- sp_inc
+    if(n_sp < n_species){
+      sp_miss <- c(1:n_species)[-sp_inc]
+      species[y,c((n_sp+1):n_species)] <- sp_miss
+    }
+    n_species_year[y] <- n_sp
+    for(s in sp_inc){
+      ln_index[y,s] <- as.numeric(tmp[which(tmp$species_ind == s & tmp$yearn2 == y),"scaled_status"])
+      ln_index_sd[y,s] <- as.numeric(tmp[which(tmp$species_ind == s & tmp$yearn2 == y),"scaled_status_sd"])
+    }
+  }
+
+  stan_data <- list(n_years = n_years,
+                    n_species = n_species,
+                    n_species_year = n_species_year,
+                    species = species,
+                    ln_index = ln_index,
+                    ln_index_sd = ln_index_sd)
+
+
+  ## fit Standard Stan model
+  file <- "models/State_of_Birds_Model_standard.stan"
+  mod <- cmdstan_model(file)
+
+  fit <- mod$sample(data = stan_data,
+                    parallel_chains = 4,
+                    refresh = 0,
+                    adapt_delta = 0.8)
+
+  sum <- fit$summary(variables = NULL,
+                     "mean",
+                     "sd",
+                     "ess_bulk",
+                     "rhat",
+                     q2_5 = q2_5,
+                     q97_5 = q97_5)
+
+  mx_rhat <- max(sum$rhat,na.rm = TRUE)
+  if(mx_rhat > 1.05){ # if not converged run again with more iterations
+    fit <- mod$sample(data = stan_data,
+                      parallel_chains = 4,
+                      iter_warmup = 8000,
+                      iter_sampling = 8000,
+                      thin = 8,
+                      refresh = 0)
+    sum <- fit$summary(variables = NULL,
+                       "mean",
+                       "sd",
+                       "ess_bulk",
+                       "rhat",
+                       q2_5 = q2_5,
+                       q97_5 = q97_5)
+  }
+
+  annual_status_standard <- sum %>%
+    filter(grepl("annual_status",variable)) %>%
+    mutate(yearn2 = as.integer(str_extract_all(variable,
+                                               "[[:digit:]]{1,}",
+                                               simplify = TRUE)),
+           model = "standard",
+           year = yearn2+(base_yr-1),
+           percent_diff = (exp(mean)-1)*100,
+           percent_diff_lci = (exp(q2_5)-1)*100,
+           percent_diff_uci = (exp(q97_5)-1)*100)
+
+  saveRDS(annual_status_standard,paste0("output/composite_fit_standard_",grp,".rds"))
+
+  annual_status_combine <- bind_rows(annual_status_difference,
+                                     annual_status_standard)
+
+
+  brks_pch <- c(-95,-90,-75,-50,-40,-25,0,25,50,100,200,300,500)
+  brks_log <- log((brks_pch/100)+1)
+  brks_labs <- paste0(brks_pch,"%")
+
+
+
+  inds_label <- inds_all %>%
+    inner_join(.,sp_y,
+               by = c("species_ind",
+                      "speciesId",
+                      "year" = "last_year"))
+
+  tst <- ggplot(data = annual_status_combine,
+                aes(x = year,y = mean))+
+    # geom_line(data = inds_all,
+    #           aes(x = year,y = scaled_status,
+    #               group = species_ind),
+    #           alpha = 0.2,
+    #           inherit.aes = FALSE)+
+    geom_ribbon(aes(ymin = q2_5,ymax = q97_5),
+                alpha = 0.5)+
+    geom_line()+
+    # geom_text(data = inds_label,
+    #           aes(x = year,y = scaled_status,
+    #               label = english_name),
+    #           size = 2)+
+    scale_y_continuous(breaks = brks_log,
+                       labels = brks_labs)+
+    labs(title = grp)+
+    theme_bw()+
+    facet_wrap(vars(model))
+
+  tst2 <- ggplot(data = annual_status_difference,
+                aes(x = year,y = mean))+
+    geom_line(data = inds_all,
+              aes(x = year,y = scaled_status,
+                  group = species_ind),
+              alpha = 0.2,
+              inherit.aes = FALSE)+
+    geom_ribbon(aes(ymin = q2_5,ymax = q97_5),
+                alpha = 0.5)+
+    geom_line()+
+    geom_text(data = inds_label,
+              aes(x = year,y = scaled_status,
+                  label = english_name),
+              size = 2)+
+    scale_y_continuous(breaks = brks_log,
+                       labels = brks_labs)+
+    labs(title = grp)+
+    theme_bw()
+
+  print(tst/
+          tst2)
+
+
+
+}
+
+
+dev.off()
 
 
 

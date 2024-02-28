@@ -522,7 +522,7 @@ stan_data2 <- list(n_years = n_years,
                      q97_5 = q97_5)
   
   mx_rhat2 <- max(sum2$rhat,na.rm = TRUE)
-  if(mx_rhat > 1.05){
+  if(mx_rhat2 > 1.05){
       fit2 <- mod$sample(data = stan_data2,
                     parallel_chains = 4,
                     iter_warmup = 8000,

@@ -55,6 +55,7 @@ generated quantities {
 vector[n_years] annual_diffs;
 vector[n_years] scaled_status;
 vector[n_years] scaled_log_status;
+vector[n_years] mu_smooth = MU + smooth_pred;
 
 annual_diffs[1] = 0;
 scaled_status[1] = 0;
@@ -62,9 +63,9 @@ scaled_log_status[1] = 1;
 
 
 for(y in 2:n_years){
-  scaled_status[y] = mu[y]-mu[1];
-  scaled_log_status[y] = exp(mu[y])/exp(mu[1]);
-  annual_diffs[y] = mu[y]-mu[y-1];
+  scaled_status[y] = mu_smooth[y]-mu_smooth[1];
+  scaled_log_status[y] = exp(mu_smooth[y])/exp(mu_smooth[1]);
+  annual_diffs[y] = mu_smooth[y]-mu_smooth[y-1];
 
 }
 
