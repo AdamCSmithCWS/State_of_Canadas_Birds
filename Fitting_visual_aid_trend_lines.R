@@ -21,36 +21,44 @@ q97_5 <- function(x)c(q97_5 = quantile(x,probs = c(0.975),
 re_download <- FALSE
 
 if(re_download){
+
   #Data on species populations#
   nc_query_table(username = "adam.smith",
-                 table = "vwResultsSocbSpecies") -> sp_tbl
-  saveRDS(sp_tbl,"data/vwResultsSocbSpecies.rds")
+                 table = "SocbTrendRank") -> rank_tbl
+  saveRDS(rank_tbl,"data/SocbTrendRank.rds")
+
+  #Data on species populations#
+  nc_query_table(username = "adam.smith",
+                 table = "SocbSpecies") -> sp_tbl
+  saveRDS(sp_tbl,"data/SocbSpecies.rds")
 
   #Information on species' group#
   nc_query_table(username = "adam.smith",
-                 table = "vwResultsGroups") -> group_tbl
-  saveRDS(group_tbl,"data/vwResultsGroups.rds")
+                 table = "Groups") -> group_tbl
+  saveRDS(group_tbl,"data/Groups.rds")
 
-  #Data on all trends#
+  #Data on all annual indices of abundance#
   nc_query_table(username = "adam.smith",
-                 table = "vwResultsTrendsAll") -> trend_tbl
-  saveRDS(trend_tbl,"data/vwResultsTrendsAll.rds")
+                 table = "TrendsIndices") -> indices_tbl
+  saveRDS(indices_tbl,"data/TrendsIndices.rds")
 
-  #Data on species trends used for SoCB rank 1-3#
+  #Data on goal-based annual indices of abundance#
   nc_query_table(username = "adam.smith",
-                 table = "vwResultsSocbTrendRank") -> rank_tbl
-  saveRDS(rank_tbl,"data/vwResultsSocbTrendRank.rds")
+                 table = "TrendsIndicesGoals") -> goal_indices_tbl
+  saveRDS(goal_indices_tbl,"data/TrendsIndicesGoals.rds")
 
-  #Data on species annual indices of abundance #
+  #Data on species trends #
   nc_query_table(username = "adam.smith",
-                 table = "vwResultsTrendsIndices") -> indices_tbl
-  saveRDS(indices_tbl,"data/vwResultsTrendsIndices.rds")
+                 table = "Trends") -> trends_tbl
+  saveRDS(trends_tbl,"data/Trends.rds")
+
 }else{
-  sp_tbl <- readRDS("data/vwResultsSocbSpecies.rds")
-  group_tbl <- readRDS("data/vwResultsGroups.rds")
-  trend_tbl <- readRDS("data/vwResultsTrendsAll.rds")
-  rank_tbl <- readRDS("data/vwResultsSocbTrendRank.rds")
-  indices_tbl <- readRDS("data/vwResultsTrendsIndices.rds")
+  sp_tbl <- readRDS("data/SocbSpecies.rds")
+  group_tbl <- readRDS("data/Groups.rds")
+  trend_tbl <- readRDS("data/Trends.rds")
+  rank_tbl <- readRDS("data/SocbTrendRank.rds")
+  indices_tbl <- readRDS("data/TrendsIndices.rds")
+  goal_indices_tbl <- readRDS("data/TrendsIndicesGoals.rds")
 
 }
 

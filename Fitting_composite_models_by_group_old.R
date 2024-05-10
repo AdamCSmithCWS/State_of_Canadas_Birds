@@ -18,8 +18,7 @@ q97_5 <- function(x)c(q97_5 = quantile(x,probs = c(0.975),
 
 
 base_year <- 1970
-fit_alternate_socb_model <- FALSE #use TRUE if traditional SOCB model is desired
-re_smooth <- FALSE
+
 
 
 
@@ -68,7 +67,6 @@ if(re_download){
 
 }
 
-if(re_smooth){
 # Generate species-level smooths ------------------------------------------
 
 sp_simple <- sp_tbl %>%
@@ -153,7 +151,7 @@ if(nrow(miss_inds) > 0){
   all_inds <- all_inds %>%
     rowwise() %>%
     mutate(ifelse(indexLowerCI == 0,max(0.1,index-indexUpperCI),indexLowerCI)) #fixes lower bound for a handful of
-  warning(paste((paste(miss_sp,collapse = ", ")),"had missing index or CI information, that should be repaired in the next step"))
+  warning(paste((paste(miss_sp,collapse = ", ")),"have missing index or CI information"))
 }
 
 all_inds <- all_inds %>%
@@ -303,7 +301,6 @@ for(species in all_sp){
 
 saveRDS(all_smoothed_indices,"socb_smoothed_indices.rds")
 
-}
 # Prepare data ------------------------------------------------------------
 
 
@@ -315,26 +312,32 @@ all_smoothed_indices <- readRDS("socb_smoothed_indices.rds")
 # Group-level models ------------------------------------------------------
 
 
-species_groups <- read_xlsx("data/SOCB_AnalysisGroups.xlsx") %>%
-  mutate(group_name = gsub("/",x = group_name,
-                           replacement = "_",fixed = TRUE)) #remvoing the special character in "Edge/Early"
+species_groups <- read_xlsx("data/SOCB_AnalysisGroups.xlsx")
 
 
-groups_to_fit <- unique(species_groups$group_name)
+
+# my_custom_name_repair <- function(nms){
+#   nc <- tolower(str_replace_all( pattern = "[[:punct:]]+",replacement = "", nms))
+#   nc <- str_replace_all( pattern = "[\r\n]",replacement = "", nc)
+#   nc <- str_replace_all( pattern = "[[:blank:]]+",replacement = "_", nc)
+# }
+#
+# species_groups <- read_xlsx("data/SoCB species guild associations Feb2024.xlsx",
+#                             .name_repair = my_custom_name_repair)
+
+groups_to_fit <- species_groups %>%
+  select(waterfowl:all_other_birds_tous_les_autres_oiseaux) %>%
+  names()
 
 # # remove non-native and range expansion species
+# species_to_fit <- species_groups %>%
+#   rename(speciesId = speciesid) %>%
+#   mutate(speciesId = as.integer(speciesId)) %>%
+#   filter(!is.na(regularly_occurring_native_species_included_in_analyses),
+#          is.na(species_whose_range_expanded_into_canada_since_1970_excluded_from_indicators),
+#          !is.na(speciesId))
+#
 
-species_to_drop <- c("Wild Turkey",
-"Anna's Hummingbird",
-"Black-necked Stilt",
-"Great Egret",
-"White-faced Ibis",
-"Red-bellied Woodpecker",
-"Bushtit",
-"Carolina Wren",
-"Blue-gray Gnatcatcher",
-"Blue-winged Warbler",
-"Gray Flycatcher")
 
 # Group loop --------------------------------------------------------------
 
@@ -343,60 +346,31 @@ pdf("figures/composite_summary_plots.pdf",
     height = 11)
 for(grp in groups_to_fit){
 
-  sub_groups_to_fit <- species_groups %>%
-    filter(group_name == grp,
-           !english_name %in% species_to_drop) %>%
-    select(subgroup) %>%
-    distinct() %>%
-    #filter(subgroup!= "NULL") %>%
-    unlist()
-
-  for(sub_grp in sub_groups_to_fit){
-
-  species_sel <- species_groups %>%
-    filter(group_name == grp,
-           subgroup == sub_grp,
-           included == "Y",
-           !english_name %in% species_to_drop) %>%
-    mutate(speciesId = species_id)
-
-
+  species_sel <- species_to_fit[which(!is.na(species_to_fit[,grp])),c("speciesId",
+                                                                      "english_name",grp)]
 
   if(nrow(species_sel) == 0){next}
-  if(nrow(species_sel) != length(unique(species_sel$species_id))){
-    stop(paste("Problem with species list for",grp,sub_grp))
-  }
+
   n_sp_w_data <- length(which(species_sel$speciesId %in% all_smoothed_indices$speciesId))
 
   print(paste("There are data for",n_sp_w_data,"of",nrow(species_sel),
-              "in the",grp,sub_grp,"group"))
+              "in the",grp,"group"))
 
-if(n_sp_w_data/nrow(species_sel) < 0.2){
-  print(paste("Skipping",grp,sub_grp,"because only",round(n_sp_w_data/nrow(species_sel),2)*100,"% of species have data"))
+if(n_sp_w_data/nrow(species_sel) < 0.5){
+  print(paste("Skipping",grp,"because only",round(n_sp_w_data/nrow(species_sel),2)*100,"% of species have data"))
     next}
   ### Drop the base-year values and other species
 inds_all <- all_smoothed_indices %>%
   inner_join(.,species_sel,
-             by = "speciesId",
-             relation) %>%
+             by = "speciesId") %>%
   mutate(species_ind = as.integer(factor(speciesId)))#
 
-years_w_GT_50 <- inds_all %>%
-  group_by(year) %>%
-  summarise(n_sp = n(),.groups = "drop") %>%
-  mutate(p_sp = n_sp/max(n_sp,na.rm = TRUE)) %>%
-  filter(p_sp > 0.5)
-min_yr <- range(years_w_GT_50$year)[1]
-max_yr <- range(years_w_GT_50$year)[2]
-
-
-base_yr <- max(base_year,min_yr)
+base_yr <- max(base_year,min(inds_all$year))
 
 inds <- inds_all %>%
   group_by(speciesId,species_ind) %>%
-  mutate(yearn2 = year-base_yr) %>%
-  filter(year <= max_yr,
-         year > base_yr,
+  mutate(yearn2 = year-base_year) %>%
+  filter(yearn2 > 0,
          scaled_log_status_sd > 0,
          scaled_status_sd > 0,
          annual_diff_sd > 0) %>%
@@ -470,7 +444,7 @@ sum2 <- fit2$summary(variables = NULL,
 
 mx_rhat2 <- max(sum2$rhat,na.rm = TRUE)
 if(mx_rhat2 > 1.05){
-  fit2 <- mod2$sample(data = stan_data2,
+  fit2 <- mod$sample(data = stan_data2,
                      parallel_chains = 4,
                      iter_warmup = 8000,
                      iter_sampling = 8000,
@@ -483,7 +457,6 @@ if(mx_rhat2 > 1.05){
                        "rhat",
                        q2_5 = q2_5,
                        q97_5 = q97_5)
-  mx_rhat2 <- max(sum2$rhat,na.rm = TRUE)
 }
 
 annual_status_difference <- sum2 %>%
@@ -497,16 +470,17 @@ annual_status_difference <- sum2 %>%
          percent_diff_lci = (exp(q2_5)-1)*100,
          percent_diff_uci = (exp(q97_5)-1)*100)
 
-
+sigma1 <- sum %>%
+  filter(grepl("sigma",variable))
 sigma2 <- sum2 %>%
   filter(grepl("sigma",variable))
 
-  saveRDS(annual_status_difference,paste0("output/composite_fit_",grp,sub_grp,".rds"))
-  saveRDS(inds_all,paste0("output/composite_data_",grp,sub_grp,".rds"))
+  saveRDS(annual_status_difference,paste0("output/composite_fit_",grp,".rds"))
+  saveRDS(inds_all,paste0("output/composite_data_",grp,".rds"))
 
 
 # alternate original model ------------------------------------------------
-if(fit_alternate_socb_model){
+
 
 
 
@@ -582,14 +556,12 @@ if(fit_alternate_socb_model){
            percent_diff_lci = (exp(q2_5)-1)*100,
            percent_diff_uci = (exp(q97_5)-1)*100)
 
-  saveRDS(annual_status_standard,paste0("output/composite_fit_standard_",grp,sub_grp,".rds"))
+  saveRDS(annual_status_standard,paste0("output/composite_fit_standard_",grp,".rds"))
 
   annual_status_combine <- bind_rows(annual_status_difference,
                                      annual_status_standard)
 
-}else{
-  annual_status_combine <- annual_status_difference
-}
+
   brks_pch <- c(-95,-90,-75,-50,-40,-25,0,25,50,100,200,300,500)
   brks_log <- log((brks_pch/100)+1)
   brks_labs <- paste0(brks_pch,"%")
@@ -618,7 +590,7 @@ if(fit_alternate_socb_model){
     #           size = 2)+
     scale_y_continuous(breaks = brks_log,
                        labels = brks_labs)+
-    labs(title = paste(grp,sub_grp))+
+    labs(title = grp)+
     theme_bw()+
     facet_wrap(vars(model))
 
@@ -638,15 +610,13 @@ if(fit_alternate_socb_model){
               size = 2)+
     scale_y_continuous(breaks = brks_log,
                        labels = brks_labs)+
-    labs(title = paste(grp,sub_grp))+
+    labs(title = grp)+
     theme_bw()
 
   print(tst/
           tst2)
 
 
-
-}
 
 }
 
