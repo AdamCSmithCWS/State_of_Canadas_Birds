@@ -12,24 +12,47 @@ base_year <- 1970
 
 # Group-level models ------------------------------------------------------
 
-my_custom_name_repair <- function(nms){
-  nc <- tolower(str_replace_all( pattern = "[[:punct:]]+",replacement = "", nms))
-  nc <- str_replace_all( pattern = "[\r\n]",replacement = "", nc)
-  nc <- str_replace_all( pattern = "[[:blank:]]+",replacement = "_", nc)
-}
 
-species_groups <- read_xlsx("data/SoCB species guild associations Feb2024.xlsx",
-                            .name_repair = my_custom_name_repair)
+species_groups <- read_xlsx("data/SOCB_AnalysisGroups.xlsx") %>%
+  mutate(group_name = gsub("/",x = group_name,
+                           replacement = "_",fixed = TRUE)) #remvoing the special character in "Edge/Early"
 
-groups_to_fit <- species_groups %>%
-  select(waterfowl:all_other_birds_tous_les_autres_oiseaux) %>%
-  names()
+
+groups_to_fit <- unique(species_groups$group_name)
+
+# # remove non-native and range expansion species
+
+species_to_drop <- c("Wild Turkey",
+                     "Anna's Hummingbird",
+                     "Black-necked Stilt",
+                     "Great Egret",
+                     "White-faced Ibis",
+                     "Red-bellied Woodpecker",
+                     "Bushtit",
+                     "Carolina Wren",
+                     "Blue-gray Gnatcatcher",
+                     "Blue-winged Warbler",
+                     "Gray Flycatcher")
+
+# Group loop --------------------------------------------------------------
 
 all_composites <- NULL
 
-for(grp in groups_to_fit){
+for(grp in groups_to_fit[6:8]){
 
-file_grp <- paste0("output/composite_fit_",grp,".rds")
+  # sub_groups_to_fit <- species_groups %>%
+  #   filter(group_name == grp,
+  #          !english_name %in% species_to_drop) %>%
+  #   select(subgroup) %>%
+  #   distinct() %>%
+  #   #filter(subgroup!= "NULL") %>%
+  #   unlist()
+  #
+  # for(sub_grp in sub_groups_to_fit){
+  #
+    sub_grp <- "NULL"
+
+file_grp <- paste0("output/composite_fit_",grp,sub_grp,".rds")
 if(file.exists(file_grp)){
 annual_status_difference <- readRDS(file_grp) %>%
   mutate(composite_group = grp)
@@ -45,6 +68,15 @@ out_composites <- all_composites %>%
          composite_group)
 write_csv(out_composites,
           "output/saved_draft_composite_trajectories.csv")
+species_included <- species_groups %>%
+  filter(group_name %in% unique(all_composites$composite_group),
+         subgroup == "NULL",
+         included == "Y") %>%
+  select(group_name, english_name)
+
+write_csv(species_included,
+          file = "output/species_in_selected_composite_trajectories.csv")
+
 groups_to_fit
 
 final_years <- all_composites %>%
@@ -73,8 +105,9 @@ overview <- ggplot(data = all_composites,
   geom_line()+
   geom_text(data = names_plot,
             aes(label = lbl),nudge_x = 10,
-            size = 2)+
-  coord_cartesian(xlim = c(1970,2040))+
+            size = 4)+
+  coord_cartesian(xlim = c(1970,2040),
+                  ylim = c(brks_log[3],brks_log[9]))+
   # scale_color_brewer(type = "qual",
   #                    palette = "Dark2")+
   theme_bw()+
@@ -84,7 +117,7 @@ overview <- ggplot(data = all_composites,
                      labels = brks_labs)+
   theme(legend.position = "none")
 
-pdf("figures/Initial_composite_trends.pdf",
+pdf("figures/Selected_composite_trends.pdf",
     width = 11,
     height = 8.5)
 print(overview)

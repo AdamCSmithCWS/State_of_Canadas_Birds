@@ -45,7 +45,9 @@ if(re_download){
 
   #Data on all annual indices of abundance#
   nc_query_table(username = "adam.smith",
-                 table = "TrendsIndices") -> indices_tbl
+                 table = "TrendsIndices",
+                 timeout = 240) -> indices_tbl
+
   saveRDS(indices_tbl,"data/TrendsIndices.rds")
 
   #Data on goal-based annual indices of abundance#
@@ -58,14 +60,38 @@ if(re_download){
                  table = "Trends") -> trends_tbl
   saveRDS(trends_tbl,"data/Trends.rds")
 
-}else{
-  sp_tbl <- readRDS("data/SocbSpecies.rds")
-  group_tbl <- readRDS("data/Groups.rds")
-  trend_tbl <- readRDS("data/Trends.rds")
-  rank_tbl <- readRDS("data/SocbTrendRank.rds")
-  indices_tbl <- readRDS("data/TrendsIndices.rds")
-  goal_indices_tbl <- readRDS("data/TrendsIndicesGoals.rds")
+  species_names <- naturecounts::search_species() %>%
+    rename_with(.,.fn = specid_rename)
+  saveRDS(species_names,"data/species_names.rds")
 
+
+}else{
+  specid_rename <- function(x){
+    y <- vector("character",length(x))
+    for(i in 1:length(x)){
+    if(grepl("speciesId",x[i]) |
+       grepl("species_id",x[i])){
+      y[i] <- "speciesID"
+    }else{
+      y[i] <- x[i]
+    }
+    }
+    return(y)
+  }
+  sp_tbl <- readRDS("data/SocbSpecies.rds") %>%
+    rename_with(.,.fn = specid_rename)
+  group_tbl <- readRDS("data/Groups.rds") %>%
+    rename_with(.,.fn = specid_rename)
+  trend_tbl <- readRDS("data/Trends.rds") %>%
+    rename_with(.,.fn = specid_rename)
+  rank_tbl <- readRDS("data/SocbTrendRank.rds") %>%
+    rename_with(.,.fn = specid_rename)
+  indices_tbl <- readRDS("data/TrendsIndices.rds") %>%
+    rename_with(.,.fn = specid_rename)
+  goal_indices_tbl <- readRDS("data/TrendsIndicesGoals.rds") %>%
+    rename_with(.,.fn = specid_rename)
+  species_names <- readRDS("data/species_names.rds") %>%
+    rename_with(.,.fn = specid_rename)
 }
 
 if(re_smooth){
@@ -73,11 +99,10 @@ if(re_smooth){
 
 sp_simple <- sp_tbl %>%
   select(speciesCode,speciesID) %>% #,population,popType,popID) %>%
-  rename(speciesId = speciesID) %>%
   distinct()
 goal_indices_tbl<- goal_indices_tbl %>%
   left_join(.,sp_simple,
-            by = "speciesId") %>%
+            by = "speciesID") %>%
   filter(year >= base_year) %>%
   distinct()
 
@@ -96,31 +121,31 @@ goal_indices_tbl<- goal_indices_tbl %>%
 
 
 sp_gt_1_pop <- goal_indices_tbl %>%
-  group_by(speciesId,speciesCode) %>%
+  group_by(speciesID,speciesCode) %>%
   summarise(n_years = n()) %>%
   filter(n_years > 53)
 
 ## select indices for species with > 1 region
 tst <- goal_indices_tbl %>%
-  filter(speciesId %in% sp_gt_1_pop$speciesId)
+  filter(speciesID %in% sp_gt_1_pop$speciesID)
 
 # manually determine which region names to select for national models
 tst1 <- tst %>%
-  group_by(speciesId,speciesCode,areaCode) %>%
+  group_by(speciesID,speciesCode,areaCode) %>%
   summarise(n_years = n())
 
 regions_sel <- tst1 %>%
-  filter((speciesId > 1000 & areaCode %in% c("Canada", "CAN", "USACAN"))|
+  filter((speciesID > 1000 & areaCode %in% c("Canada", "CAN", "USACAN"))|
          (speciesCode %in% c("snogoo") & areaCode %in% c("USACAN")) |
            (speciesCode %in% c("gnwtea","rinduc") & areaCode %in% c("CANPRAIRIE_WBOREAL")) )
 # filter the indices to only the national-assessment regions
 tst <- tst %>%
   inner_join(.,regions_sel,
-             by = c("speciesId","speciesCode","areaCode"))
+             by = c("speciesID","speciesCode","areaCode"))
 
 ## test to make sure manual process worked
 tst1 <- tst %>%
-  group_by(speciesId,speciesCode,areaCode) %>%
+  group_by(speciesID,speciesCode,areaCode) %>%
   summarise(n_years = n())
 if(max(tst1$n_years) > 53){
   stop("Some species have too many years of data")
@@ -130,7 +155,7 @@ if(max(tst1$n_years) > 53){
 
 # select indices for species with only one region
 tst2 <- goal_indices_tbl %>%
-  filter(!speciesId %in% sp_gt_1_pop$speciesId)
+  filter(!speciesID %in% sp_gt_1_pop$speciesID)
 
 # combine indices for species with one region with national scale indices for species with >1 region
 all_inds <- bind_rows(tst2,tst)
@@ -138,7 +163,7 @@ all_inds <- bind_rows(tst2,tst)
 
 # final check that each species has only 1 time-series
 n_yrs <- all_inds %>%
-  group_by(speciesId,areaCode) %>%
+  group_by(speciesID,areaCode) %>%
   summarise(n_years = n())
 if(max(n_yrs$n_years) > 53){
   stop("Some species have too many years of data")
@@ -172,18 +197,18 @@ all_inds <- all_inds %>%
          ln_lci = log(indexLowerCI),
          ln_uci = log(indexUpperCI),
          ln_index_sd = (ln_uci-ln_lci)/3.9) %>%
-  group_by(speciesId) %>%
+  group_by(speciesID) %>%
   mutate(yearn = year-(min(year)-1)) %>% # sets a yearn value specific to each species
-  arrange(speciesId,year)
+  arrange(speciesID,year)
 
-all_sp <- unique(all_inds$speciesId)
+all_sp <- unique(all_inds$speciesID)
 all_smoothed_indices <- NULL
 
 for(species in all_sp){
 
   inds <- all_inds %>%
-    filter(speciesId == species) %>%
-    select(speciesId,year,
+    filter(speciesID == species) %>%
+    select(speciesID,year,
            ln_index,ln_index_sd,yearn) %>%
     distinct()
 
@@ -245,12 +270,12 @@ for(species in all_sp){
     mutate(yearn = as.integer(str_extract_all(variable,
                                               "[[:digit:]]{1,}",
                                               simplify = TRUE)),
-           speciesId = species,
+           speciesID = species,
            smooth_ind = mean,
            smooth_ind_sd = sd,
            smooth_ind_lci = q2_5,
            smooth_ind_uci = q97_5) %>%
-    select(speciesId,yearn,smooth_ind,smooth_ind_sd,
+    select(speciesID,yearn,smooth_ind,smooth_ind_sd,
            smooth_ind_lci,smooth_ind_uci)
 
   diffs <- sum %>%
@@ -307,24 +332,70 @@ saveRDS(all_smoothed_indices,"socb_smoothed_indices.rds")
 # Prepare data ------------------------------------------------------------
 
 
-all_smoothed_indices <- readRDS("socb_smoothed_indices.rds")
+all_smoothed_indices <- readRDS("socb_smoothed_indices.rds") %>%
+  rename_with(.,
+              .fn = specid_rename) %>%
+  left_join(.,species_names,
+            by = "speciesID")
 
 
 
 
 # Group-level models ------------------------------------------------------
 
+if(re_download){
+# Species groups
+species_groups <- nc_query_table(table = "SocbTrendGroups",
+                                 username = "adam.smith") %>%
+  rename_with(., .fn = specid_rename) %>%
+  mutate(groupName = gsub("\r\n",
+                          "",
+                          x = groupName,
+                          fixed = TRUE),
+         groupNameFr = gsub("\r\n",
+                          "",
+                          x = groupNameFr,
+                          fixed = TRUE))
 
-species_groups <- read_xlsx("data/SOCB_AnalysisGroups.xlsx") %>%
-  mutate(group_name = gsub("/",x = group_name,
-                           replacement = "_",fixed = TRUE)) #remvoing the special character in "Edge/Early"
+saveRDS(species_groups,"data/species_groups.rds")
+}else{
+  species_groups <- readRDS("data/species_groups.rds")
+}
+
+species_non_native <- data.frame(english_name =
+                                c("Mute Swan",
+                                  "Mountain Quail",
+                                  "California Quail",
+                                  "Gray Partridge",
+                                  "Ring-necked Pheasant",
+                                  "Chukar",
+                                  "Rock Pigeon",
+                                  "Eurasian Collared-Dove",
+                                  "Eurasian Skylark",
+                                  "European Starling",
+                                  "House Sparrow"))
 
 
-groups_to_fit <- unique(species_groups$group_name)
+ss_track <- NULL
+for(j in 1:nrow(species_non_native)){
+  ss <- naturecounts::search_species(as.character(species_non_native[j,"english_name"]))
+
+  if(nrow(ss) > 1){
+    ss_sel <- which(ss$english_name == as.character(species_non_native[j,"english_name"]))
+  }else{
+    ss_sel <- 1
+  }
+  species_non_native[j,"speciesID"] <- ss[ss_sel,"species_id"]
+  species_non_native[j,"english_name_nc"] <- ss[ss_sel,"english_name"]
+
+  ss_track <- bind_rows(ss_track,ss)
+}
+
 
 # # remove non-native and range expansion species
 
-species_to_drop <- c("Wild Turkey",
+species_to_drop <- data.frame(english_name =
+                                c("Wild Turkey",
 "Anna's Hummingbird",
 "Black-necked Stilt",
 "Great Egret",
@@ -334,9 +405,48 @@ species_to_drop <- c("Wild Turkey",
 "Carolina Wren",
 "Blue-gray Gnatcatcher",
 "Blue-winged Warbler",
-"Gray Flycatcher")
+"Gray Flycatcher"))
+
+ss_track <- NULL
+for(j in 1:nrow(species_to_drop)){
+  ss <- naturecounts::search_species(as.character(species_to_drop[j,"english_name"]))
+
+  if(nrow(ss) > 1){
+    ss_sel <- which(ss$english_name == as.character(species_to_drop[j,"english_name"]))
+  }else{
+    ss_sel <- 1
+  }
+  species_to_drop[j,"speciesID"] <- ss[ss_sel,"species_id"]
+  species_to_drop[j,"english_name"] <- ss[ss_sel,"english_name"]
+
+  ss_track <- bind_rows(ss_track,ss)
+}
+
+
+species_to_drop
+
+species_groups <- species_groups %>%
+  mutate(include = ifelse(speciesID %in% species_non_native$speciesID,
+                          "N",include))
+
+species_groups <- species_groups %>%
+  filter(popType == 1) %>%
+  mutate(subgroupID = ifelse(groupName == "Wetland Birds: All",
+                             0,subgroupID))
+# species_groups <- read_xlsx("data/SOCB_AnalysisGroups.xlsx") %>%
+#   mutate(groupName = gsub("/",x = groupName,
+#                            replacement = "_",fixed = TRUE)) #remvoing the special character in "Edge/Early"
+#
+
+groups_to_fit <- unique(species_groups$groupName)
 
 # Group loop --------------------------------------------------------------
+composite_plots <- vector('list',length(groups_to_fit))
+names(composite_plots) <- groups_to_fit
+annual_status_combine <- NULL
+
+re_fit <- FALSE
+
 
 pdf("figures/composite_summary_plots.pdf",
     width = 8.5,
@@ -344,42 +454,60 @@ pdf("figures/composite_summary_plots.pdf",
 for(grp in groups_to_fit){
 
   sub_groups_to_fit <- species_groups %>%
-    filter(group_name == grp,
-           !english_name %in% species_to_drop) %>%
-    select(subgroup) %>%
+    filter(groupName == grp,
+           !speciesID %in% species_to_drop$speciesID) %>%
+    select(subgroupID) %>%
     distinct() %>%
-    #filter(subgroup!= "NULL") %>%
+    #filter(subgroupID!= "NULL") %>%
     unlist()
 
   for(sub_grp in sub_groups_to_fit){
+    grp_labl <- species_groups %>%
+      filter(groupName == grp,
+             subgroupID == sub_grp) %>%
+      select(groupName,groupNameFr) %>%
+      distinct() %>%
+      unlist()
+    grp_labl <- gsub("[[:punct:]]","",x = grp_labl)
+    grp_labl <- gsub("[[:blank:]]","_",x = grp_labl)
+    grp_labl <- paste(grp_labl,collapse = "-")
+
+
 
   species_sel <- species_groups %>%
-    filter(group_name == grp,
-           subgroup == sub_grp,
-           included == "Y",
-           !english_name %in% species_to_drop) %>%
-    mutate(speciesId = species_id)
+    filter(groupName == grp,
+           subgroupID == sub_grp,
+           include == "Y",
+           !speciesID %in% species_to_drop$speciesID) %>%
+    distinct()
 
 
 
   if(nrow(species_sel) == 0){next}
-  if(nrow(species_sel) != length(unique(species_sel$species_id))){
+  if(nrow(species_sel) != length(unique(species_sel$speciesID))){
     stop(paste("Problem with species list for",grp,sub_grp))
   }
-  n_sp_w_data <- length(which(species_sel$speciesId %in% all_smoothed_indices$speciesId))
+  n_sp_w_data <- length(which(species_sel$speciesID %in% all_smoothed_indices$speciesID))
 
   print(paste("There are data for",n_sp_w_data,"of",nrow(species_sel),
               "in the",grp,sub_grp,"group"))
 
+  species_sel <- species_sel %>%
+    mutate(sufficient_data = ifelse(speciesID %in% all_smoothed_indices$speciesID,
+                                    TRUE,
+                                    FALSE)) %>%
+    left_join(.,species_names,
+              by = "speciesID") %>%
+    select(-taxon_group)
+
 if(n_sp_w_data/nrow(species_sel) < 0.2){
   print(paste("Skipping",grp,sub_grp,"because only",round(n_sp_w_data/nrow(species_sel),2)*100,"% of species have data"))
     next}
+
   ### Drop the base-year values and other species
 inds_all <- all_smoothed_indices %>%
-  inner_join(.,species_sel,
-             by = "speciesId",
-             relation) %>%
-  mutate(species_ind = as.integer(factor(speciesId)))#
+  filter(speciesID %in% species_sel$speciesID) %>%
+  mutate(species_ind = as.integer(factor(speciesID)))#
 
 years_w_GT_50 <- inds_all %>%
   group_by(year) %>%
@@ -393,7 +521,7 @@ max_yr <- range(years_w_GT_50$year)[2]
 base_yr <- max(base_year,min_yr)
 
 inds <- inds_all %>%
-  group_by(speciesId,species_ind) %>%
+  group_by(speciesID,species_ind) %>%
   mutate(yearn2 = year-base_yr) %>%
   filter(year <= max_yr,
          year > base_yr,
@@ -404,12 +532,13 @@ inds <- inds_all %>%
 
 ## track the start and end years for each species
 sp_y <- inds %>%
-  group_by(species_ind,speciesId) %>%
+  group_by(species_ind,speciesID) %>%
   summarise(first_year = min(year),
             last_year = max(year),
             first_yearn2 = min(yearn2),
             last_yearn2 = max(yearn2),
             .groups = "drop")
+if(re_fit){
 
 # number of years and species
 n_years <- max(inds$yearn2,na.rm = TRUE)
@@ -501,10 +630,27 @@ annual_status_difference <- sum2 %>%
 sigma2 <- sum2 %>%
   filter(grepl("sigma",variable))
 
-  saveRDS(annual_status_difference,paste0("output/composite_fit_",grp,sub_grp,".rds"))
-  saveRDS(inds_all,paste0("output/composite_data_",grp,sub_grp,".rds"))
+annual_status_difference <- annual_status_difference %>%
+  mutate(groupName = grp,
+         subgroupID = sub_grp)
+inds_all <- inds_all %>%
+  mutate(groupName = grp,
+         subgroupID = sub_grp)
+species_sel <- species_sel %>%
+  mutate(groupName = grp,
+         subgroupID = sub_grp)
+
+  saveRDS(annual_status_difference,paste0("output/composite_fit_",grp_labl,".rds"))
+  saveRDS(inds_all,paste0("output/composite_data_",grp_labl,".rds"))
+  saveRDS(species_sel,paste0("output/composite_species_list_",grp_labl,".rds"))
+
+    }else{#end if re-fit
+      annual_status_difference <- readRDS(paste0("output/composite_fit_",grp_labl,".rds"))
+      inds_all <- readRDS(paste0("output/composite_data_",grp_labl,".rds"))
+      species_sel <- readRDS(paste0("output/composite_species_list_",grp_labl,".rds"))
 
 
+    }
 # alternate original model ------------------------------------------------
 if(fit_alternate_socb_model){
 
@@ -582,48 +728,62 @@ if(fit_alternate_socb_model){
            percent_diff_lci = (exp(q2_5)-1)*100,
            percent_diff_uci = (exp(q97_5)-1)*100)
 
-  saveRDS(annual_status_standard,paste0("output/composite_fit_standard_",grp,sub_grp,".rds"))
+  saveRDS(annual_status_standard,paste0("output/composite_fit_standard_",grp_labl,".rds"))
 
   annual_status_combine <- bind_rows(annual_status_difference,
                                      annual_status_standard)
 
 }else{
-  annual_status_combine <- annual_status_difference
+  annual_status_combine <- bind_rows(annual_status_combine,annual_status_difference)
 }
   brks_pch <- c(-95,-90,-75,-50,-40,-25,0,25,50,100,200,300,500)
   brks_log <- log((brks_pch/100)+1)
   brks_labs <- paste0(brks_pch,"%")
 
+species_miss_en <- species_sel %>%
+  filter(sufficient_data == FALSE) %>%
+  select(english_name) %>%
+  unlist()
+
+species_miss_fr <- species_sel %>%
+  filter(sufficient_data == FALSE) %>%
+  select(french_name) %>%
+  unlist()
 
 
-  inds_label <- inds_all %>%
+capt_en <- paste("No data:",paste(species_miss_en,collapse = ", "))
+capt_fr <- paste("Pas de données:",paste(species_miss_fr,collapse = ", "))
+
+capt <- paste(capt_en,"\n",capt_fr)
+
+ylimu <- max(annual_status_difference$q97_5,1.1)
+yliml <- min(annual_status_difference$q2_5,-1.1)
+
+
+inds_label <- inds_all %>%
     inner_join(.,sp_y,
                by = c("species_ind",
-                      "speciesId",
+                      "speciesID",
                       "year" = "last_year"))
 
-  tst <- ggplot(data = annual_status_combine,
+  tst <- ggplot(data = annual_status_difference,
                 aes(x = year,y = mean))+
-    # geom_line(data = inds_all,
-    #           aes(x = year,y = scaled_status,
-    #               group = species_ind),
-    #           alpha = 0.2,
-    #           inherit.aes = FALSE)+
+    geom_hline(yintercept = 0)+
     geom_ribbon(aes(ymin = q2_5,ymax = q97_5),
-                alpha = 0.5)+
+                alpha = 0.25)+
     geom_line()+
-    # geom_text(data = inds_label,
-    #           aes(x = year,y = scaled_status,
-    #               label = english_name),
-    #           size = 2)+
     scale_y_continuous(breaks = brks_log,
-                       labels = brks_labs)+
-    labs(title = paste(grp,sub_grp))+
+                       labels = brks_labs,
+                       limits = c(yliml,ylimu))+
+    labs(title = paste(grp_labl),
+         caption = capt)+
+    xlab("")+
     theme_bw()+
-    facet_wrap(vars(model))
+    theme(plot.caption = element_text(size = 5))
 
   tst2 <- ggplot(data = annual_status_difference,
                 aes(x = year,y = mean))+
+    geom_hline(yintercept = 0)+
     geom_line(data = inds_all,
               aes(x = year,y = scaled_status,
                   group = species_ind),
@@ -632,18 +792,30 @@ if(fit_alternate_socb_model){
     geom_ribbon(aes(ymin = q2_5,ymax = q97_5),
                 alpha = 0.5)+
     geom_line()+
-    geom_text(data = inds_label,
+    ggrepel::geom_text_repel(data = inds_label,
               aes(x = year,y = scaled_status,
                   label = english_name),
-              size = 2)+
+              size = 1.5,
+              max.overlaps = 30,
+              min.segment.length = 0,
+              nudge_x = 5,
+              alpha = 0.8,
+              box.padding = 0.1,
+              segment.alpha = 0.3,
+              segment.size = 0.2)+
     scale_y_continuous(breaks = brks_log,
                        labels = brks_labs)+
-    labs(title = paste(grp,sub_grp))+
+    scale_x_continuous(limits = c(1970,2062))+
+    labs(title = paste(grp_labl))+
+    xlab("")+
     theme_bw()
+
+  #tst2
 
   print(tst/
           tst2)
 
+composite_plots[[grp]] <- tst2
 
 
 }
@@ -652,6 +824,6 @@ if(fit_alternate_socb_model){
 
 
 dev.off()
-
+#
 
 
