@@ -1,5 +1,5 @@
 ### fitting the composite group indicator models for the State of Canada's Birds
-
+###
 library(tidyverse)
 library(cmdstanr)
 library(readxl)
@@ -19,28 +19,44 @@ q97_5 <- function(x)c(q97_5 = quantile(x,probs = c(0.975),
 
 base_year <- 1970
 fit_alternate_socb_model <- FALSE #use TRUE if traditional SOCB model is desired
-re_smooth <- FALSE
+re_smooth <- TRUE
 
 
 
 # extract state of canada's birds -----------------------------------------
-re_download <- FALSE
+re_download <- TRUE
+
+specid_rename <- function(x){
+  y <- vector("character",length(x))
+  for(i in 1:length(x)){
+    if(grepl("speciesId",x[i]) |
+       grepl("species_id",x[i])){
+      y[i] <- "speciesID"
+    }else{
+      y[i] <- x[i]
+    }
+  }
+  return(y)
+}
 
 if(re_download){
 
   #Data on species populations#
   nc_query_table(username = "adam.smith",
-                 table = "SocbTrendRank") -> rank_tbl
+                 table = "SocbTrendRank",
+                 timeout = 120) -> rank_tbl
   saveRDS(rank_tbl,"data/SocbTrendRank.rds")
 
   #Data on species populations#
   nc_query_table(username = "adam.smith",
-                 table = "SocbSpecies") -> sp_tbl
+                 table = "SocbSpecies",
+                 timeout = 120) -> sp_tbl
   saveRDS(sp_tbl,"data/SocbSpecies.rds")
 
   #Information on species' group#
   nc_query_table(username = "adam.smith",
-                 table = "Groups") -> group_tbl
+                 table = "Groups",
+                 timeout = 120) -> group_tbl
   saveRDS(group_tbl,"data/Groups.rds")
 
   #Data on all annual indices of abundance#
@@ -52,12 +68,14 @@ if(re_download){
 
   #Data on goal-based annual indices of abundance#
   nc_query_table(username = "adam.smith",
-                 table = "TrendsIndicesGoals") -> goal_indices_tbl
+                 table = "TrendsIndicesGoals",
+                 timeout = 120) -> goal_indices_tbl
   saveRDS(goal_indices_tbl,"data/TrendsIndicesGoals.rds")
 
   #Data on species trends #
   nc_query_table(username = "adam.smith",
-                 table = "Trends") -> trends_tbl
+                 table = "Trends",
+                 timeout = 120) -> trends_tbl
   saveRDS(trends_tbl,"data/Trends.rds")
 
   species_names <- naturecounts::search_species() %>%
@@ -65,19 +83,8 @@ if(re_download){
   saveRDS(species_names,"data/species_names.rds")
 
 
-}else{
-  specid_rename <- function(x){
-    y <- vector("character",length(x))
-    for(i in 1:length(x)){
-    if(grepl("speciesId",x[i]) |
-       grepl("species_id",x[i])){
-      y[i] <- "speciesID"
-    }else{
-      y[i] <- x[i]
-    }
-    }
-    return(y)
-  }
+}
+
   sp_tbl <- readRDS("data/SocbSpecies.rds") %>%
     rename_with(.,.fn = specid_rename)
   group_tbl <- readRDS("data/Groups.rds") %>%
@@ -92,19 +99,59 @@ if(re_download){
     rename_with(.,.fn = specid_rename)
   species_names <- readRDS("data/species_names.rds") %>%
     rename_with(.,.fn = specid_rename)
-}
+
 
 if(re_smooth){
 # Generate species-level smooths ------------------------------------------
 
+
+  rank_tbl <- rank_tbl %>%
+    select(trendID,goalTrend,popID,rank,speciesID,subspeciesID,trendID,
+           resultsCode,popType,areaCode)%>%
+    filter(goalTrend == "Y",
+           popType == 1) %>%
+    distinct()
+
+
 sp_simple <- sp_tbl %>%
-  select(speciesCode,speciesID) %>% #,population,popType,popID) %>%
+  select(speciesCode,speciesID,
+         population,
+         objective,
+         popID,
+         popType) %>% #,population,popType,popID) %>%
+  filter(popType == 1) %>%
+  left_join(.,species_names) %>%
   distinct()
-goal_indices_tbl<- goal_indices_tbl %>%
-  left_join(.,sp_simple,
-            by = "speciesID") %>%
+
+
+traj_sel <- rank_tbl %>%
+  inner_join(.,sp_simple)
+
+
+
+goal_indices_tbl <- goal_indices_tbl %>%
+  select(resultsCode,speciesID,
+         year, index, indexUpperCI,indexLowerCI,
+         areaCode)%>%
+  distinct()
+
+
+
+
+
+
+
+
+# trend_tbl <- trend_tbl %>%
+#   select(resultsCode, speciesID,trendID, socb, rank)%>%
+#   distinct()
+
+
+goal_indices_tbl1 <- goal_indices_tbl %>%
+  inner_join(.,traj_sel) %>%
   filter(year >= base_year) %>%
   distinct()
+
 
 # gwte <- goal_indices_tbl %>%
 #   filter(speciesCode == "gnwtea",
@@ -120,7 +167,7 @@ goal_indices_tbl<- goal_indices_tbl %>%
 # tst
 
 
-sp_gt_1_pop <- goal_indices_tbl %>%
+sp_gt_1_pop <- goal_indices_tbl1 %>%
   group_by(speciesID,speciesCode) %>%
   summarise(n_years = n()) %>%
   filter(n_years > 53)
@@ -130,35 +177,38 @@ tst <- goal_indices_tbl %>%
   filter(speciesID %in% sp_gt_1_pop$speciesID)
 
 # manually determine which region names to select for national models
-tst1 <- tst %>%
-  group_by(speciesID,speciesCode,areaCode) %>%
-  summarise(n_years = n())
-
-regions_sel <- tst1 %>%
-  filter((speciesID > 1000 & areaCode %in% c("Canada", "CAN", "USACAN"))|
-         (speciesCode %in% c("snogoo") & areaCode %in% c("USACAN")) |
-           (speciesCode %in% c("gnwtea","rinduc") & areaCode %in% c("CANPRAIRIE_WBOREAL")) )
-# filter the indices to only the national-assessment regions
-tst <- tst %>%
-  inner_join(.,regions_sel,
-             by = c("speciesID","speciesCode","areaCode"))
+# tst1 <- tst %>%
+#   group_by(speciesID,speciesCode,areaCode) %>%
+#   summarise(n_years = n())
+# #speciesID > 1000 &
+# regions_sel <- tst1 %>%
+#   filter(( areaCode %in% c("Canada", "CAN", "USACAN"))|
+#          (speciesCode %in% c("snogoo") & areaCode %in% c("USACAN")) |
+#            (speciesCode %in% c("gnwtea","rinduc") & areaCode %in% c("CANPRAIRIE_WBOREAL")) )
+# # filter the indices to only the national-assessment regions
+# tst <- tst %>%
+#   inner_join(.,regions_sel,
+#              by = c("speciesID","speciesCode","areaCode"))
 
 ## test to make sure manual process worked
-tst1 <- tst %>%
-  group_by(speciesID,speciesCode,areaCode) %>%
-  summarise(n_years = n())
-if(max(tst1$n_years) > 53){
-  stop("Some species have too many years of data")
-}
-## end test
+# tst1 <- tst %>%
+#   group_by(speciesID,speciesCode,areaCode) %>%
+#   summarise(n_years = n())
+# if(max(tst1$n_years) > 53){
+#   stop("Some species have too many years of data")
+# }
+# ## end test
 
 
 # select indices for species with only one region
-tst2 <- goal_indices_tbl %>%
-  filter(!speciesID %in% sp_gt_1_pop$speciesID)
+# tst2 <- goal_indices_tbl %>%
+#   filter(!speciesID %in% sp_gt_1_pop$speciesID)
 
 # combine indices for species with one region with national scale indices for species with >1 region
-all_inds <- bind_rows(tst2,tst)
+all_inds <- goal_indices_tbl %>%
+  inner_join(.,traj_sel) %>%
+  filter(year >= base_year) %>%
+  distinct()
 
 
 # final check that each species has only 1 time-series
@@ -190,7 +240,7 @@ saveRDS(all_inds,"data/all_socb_goal_indices.rds")
 
 #all_inds <- readRDS("data/Canadian_BBS_indices.rds")
 
-#all_inds <- readRDS("socb_smoothed_indices.rds")
+#all_inds <- readRDS("data/all_socb_goal_indices.rds")
 
 all_inds <- all_inds %>%
   mutate(ln_index = log(index),
@@ -445,7 +495,7 @@ composite_plots <- vector('list',length(groups_to_fit))
 names(composite_plots) <- groups_to_fit
 annual_status_combine <- NULL
 
-re_fit <- FALSE
+re_fit <- TRUE
 
 
 pdf("figures/composite_summary_plots.pdf",
@@ -826,4 +876,4 @@ composite_plots[[grp]] <- tst2
 dev.off()
 #
 
-
+saveRDS(annual_status_combine,"output/annual_status_combine.rds")

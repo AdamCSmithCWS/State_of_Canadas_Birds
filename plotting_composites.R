@@ -4,90 +4,87 @@
 library(tidyverse)
 library(readxl)
 library(patchwork)
+library(ggrepel)
 
 
 
 base_year <- 1970
 
 
+specid_rename <- function(x){
+  y <- vector("character",length(x))
+  for(i in 1:length(x)){
+    if(grepl("speciesId",x[i]) |
+       grepl("species_id",x[i])){
+      y[i] <- "speciesID"
+    }else{
+      y[i] <- x[i]
+    }
+  }
+  return(y)
+}
+
+sp_tbl <- readRDS("data/SocbSpecies.rds") %>%
+  rename_with(.,.fn = specid_rename)
+group_tbl <- readRDS("data/Groups.rds") %>%
+  rename_with(.,.fn = specid_rename)
+trend_tbl <- readRDS("data/Trends.rds") %>%
+  rename_with(.,.fn = specid_rename)
+rank_tbl <- readRDS("data/SocbTrendRank.rds") %>%
+  rename_with(.,.fn = specid_rename)
+indices_tbl <- readRDS("data/TrendsIndices.rds") %>%
+  rename_with(.,.fn = specid_rename)
+goal_indices_tbl <- readRDS("data/TrendsIndicesGoals.rds") %>%
+  rename_with(.,.fn = specid_rename)
+species_names <- readRDS("data/species_names.rds") %>%
+  rename_with(.,.fn = specid_rename)
+
+
+all_inds <- readRDS("data/all_socb_goal_indices.rds")
+
+
+all_smoothed_indices <- readRDS("socb_smoothed_indices.rds") %>%
+  rename_with(.,
+              .fn = specid_rename) %>%
+  left_join(.,species_names,
+            by = "speciesID")
+
+all_composites <- readRDS("output/annual_status_combine.rds")
+
+
+species_groups <- readRDS("data/species_groups.rds")
+
+main_groups <- species_groups %>%
+  filter(subgroupID == 0,
+         groupName != "Galliformes: All") %>%
+  select(groupName) %>%
+  distinct() %>%
+  #mutate(groupName = str_trim(gsub(": All","",x = groupName))) %>%
+  unlist()
+
 # Group-level models ------------------------------------------------------
 
 
-species_groups <- read_xlsx("data/SOCB_AnalysisGroups.xlsx") %>%
-  mutate(group_name = gsub("/",x = group_name,
-                           replacement = "_",fixed = TRUE)) #remvoing the special character in "Edge/Early"
-
-
-groups_to_fit <- unique(species_groups$group_name)
-
-# # remove non-native and range expansion species
-
-species_to_drop <- c("Wild Turkey",
-                     "Anna's Hummingbird",
-                     "Black-necked Stilt",
-                     "Great Egret",
-                     "White-faced Ibis",
-                     "Red-bellied Woodpecker",
-                     "Bushtit",
-                     "Carolina Wren",
-                     "Blue-gray Gnatcatcher",
-                     "Blue-winged Warbler",
-                     "Gray Flycatcher")
-
-# Group loop --------------------------------------------------------------
-
-all_composites <- NULL
-
-for(grp in groups_to_fit[6:8]){
-
-  # sub_groups_to_fit <- species_groups %>%
-  #   filter(group_name == grp,
-  #          !english_name %in% species_to_drop) %>%
-  #   select(subgroup) %>%
-  #   distinct() %>%
-  #   #filter(subgroup!= "NULL") %>%
-  #   unlist()
-  #
-  # for(sub_grp in sub_groups_to_fit){
-  #
-    sub_grp <- "NULL"
-
-file_grp <- paste0("output/composite_fit_",grp,sub_grp,".rds")
-if(file.exists(file_grp)){
-annual_status_difference <- readRDS(file_grp) %>%
-  mutate(composite_group = grp)
-
-all_composites <- bind_rows(all_composites,annual_status_difference)
-
-}
-
-}
-
 out_composites <- all_composites %>%
-  select(year,mean,q2_5,q97_5,percent_diff,percent_diff_lci,percent_diff_uci,
-         composite_group)
+  select(groupName,year,mean,q2_5,q97_5,percent_diff,percent_diff_lci,percent_diff_uci)
 write_csv(out_composites,
           "output/saved_draft_composite_trajectories.csv")
-species_included <- species_groups %>%
-  filter(group_name %in% unique(all_composites$composite_group),
-         subgroup == "NULL",
-         included == "Y") %>%
-  select(group_name, english_name)
 
-write_csv(species_included,
-          file = "output/species_in_selected_composite_trajectories.csv")
 
-groups_to_fit
 
-final_years <- all_composites %>%
-  group_by(composite_group) %>%
+main_composites <- all_composites %>%
+  filter(groupName %in% main_groups)
+
+
+final_years <- main_composites %>%
+  group_by(groupName) %>%
   summarise(last_year = max(year))
 
-names_plot <- all_composites %>%
+names_plot <- main_composites %>%
   inner_join(.,final_years,
-             by = c("composite_group",
+             by = c("groupName",
                     "year" = "last_year")) %>%
-  mutate(lbl = paste(composite_group,round(percent_diff),"%"))
+  mutate(lbl = paste(groupName,round(percent_diff),"%"))
 
 
 
@@ -98,18 +95,18 @@ brks_labs <- paste0(brks_pch,"%") # text labels to add to the y-axis
 
 
 
-overview <- ggplot(data = all_composites,
-                   aes(x = year,y = mean, group = composite_group,
-                       colour = composite_group))+
+overview <- ggplot(data = main_composites,
+                   aes(x = year,y = mean, group = groupName,
+                       colour = groupName))+
   geom_hline(yintercept = 0)+
   geom_line()+
-  geom_text(data = names_plot,
+  geom_text_repel(data = names_plot,
             aes(label = lbl),nudge_x = 10,
-            size = 4)+
+            size = 4,
+            segment.alpha = 0.3)+
   coord_cartesian(xlim = c(1970,2040),
                   ylim = c(brks_log[3],brks_log[9]))+
-  # scale_color_brewer(type = "qual",
-  #                    palette = "Dark2")+
+  scale_color_viridis_d()+
   theme_bw()+
   ylab("")+
   xlab("")+
@@ -117,9 +114,12 @@ overview <- ggplot(data = all_composites,
                      labels = brks_labs)+
   theme(legend.position = "none")
 
-pdf("figures/Selected_composite_trends.pdf",
-    width = 11,
-    height = 8.5)
+overview
+
+
+pdf("figures/Main_composite_indicators.pdf",
+    width = 8.5,
+    height = 11)
 print(overview)
 dev.off()
 
@@ -165,26 +165,26 @@ for(i in 1:length(major_groups)){
   sel <- major_groups[[i]]
 
   sel_comp <- all_composites %>%
-    filter(composite_group %in% sel)
+    filter(groupName %in% sel)
 
 
   final_years <- sel_comp %>%
-    group_by(composite_group) %>%
+    group_by(groupName) %>%
     summarise(last_year = max(year))
 
   names_plot <- sel_comp %>%
     inner_join(.,final_years,
-               by = c("composite_group",
+               by = c("groupName",
                       "year" = "last_year")) %>%
-    mutate(lbl = paste(composite_group,round(percent_diff),"%"))
+    mutate(lbl = paste(groupName,round(percent_diff),"%"))
 
 capt <- paste("Missing -",
-              paste(sel[which(!sel %in% names_plot$composite_group)],
+              paste(sel[which(!sel %in% names_plot$groupName)],
                     collapse = "; "))
 
 overview <- ggplot(data = sel_comp,
-                   aes(x = year,y = mean, group = composite_group,
-                       colour = composite_group))+
+                   aes(x = year,y = mean, group = groupName,
+                       colour = groupName))+
   geom_hline(yintercept = 0)+
   geom_line()+
   geom_text(data = names_plot,
