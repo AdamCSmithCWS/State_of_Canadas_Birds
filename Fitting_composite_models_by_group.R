@@ -19,12 +19,12 @@ q97_5 <- function(x)c(q97_5 = quantile(x,probs = c(0.975),
 
 base_year <- 1970
 fit_alternate_socb_model <- FALSE #use TRUE if traditional SOCB model is desired
-re_smooth <- TRUE
+re_smooth <- FALSE
 
 
 
 # extract state of canada's birds -----------------------------------------
-re_download <- TRUE
+re_download <- FALSE
 
 specid_rename <- function(x){
   y <- vector("character",length(x))
@@ -78,9 +78,26 @@ if(re_download){
                  timeout = 120) -> trends_tbl
   saveRDS(trends_tbl,"data/Trends.rds")
 
-  species_names <- naturecounts::search_species() %>%
-    rename_with(.,.fn = specid_rename)
-  saveRDS(species_names,"data/species_names.rds")
+
+  #Species groups
+  #
+  species_groups <- nc_query_table(table = "SocbTrendGroups",
+                                   username = "adam.smith",
+                                   verbose = TRUE) %>%
+    rename_with(., .fn = specid_rename) %>%
+    mutate(groupName = gsub("\r\n",
+                            "",
+                            x = groupName,
+                            fixed = TRUE),
+           groupNameFr = gsub("\r\n",
+                              "",
+                              x = groupNameFr,
+                              fixed = TRUE))
+
+
+  saveRDS(species_groups,"data/species_groups.rds")
+
+
 
 
 }
@@ -97,12 +114,17 @@ if(re_download){
     rename_with(.,.fn = specid_rename)
   goal_indices_tbl <- readRDS("data/TrendsIndicesGoals.rds") %>%
     rename_with(.,.fn = specid_rename)
-  species_names <- readRDS("data/species_names.rds") %>%
-    rename_with(.,.fn = specid_rename)
+  species_groups <- readRDS("data/species_groups.rds")
 
 
-if(re_smooth){
-# Generate species-level smooths ------------------------------------------
+  species_names <- naturecounts::search_species() %>%
+    rename_with(.,.fn = specid_rename) %>%
+    filter(speciesID %in% species_groups$speciesID)
+
+  saveRDS(species_names,"data/species_names.rds")
+
+
+
 
 
   rank_tbl <- rank_tbl %>%
@@ -176,33 +198,6 @@ sp_gt_1_pop <- goal_indices_tbl1 %>%
 tst <- goal_indices_tbl %>%
   filter(speciesID %in% sp_gt_1_pop$speciesID)
 
-# manually determine which region names to select for national models
-# tst1 <- tst %>%
-#   group_by(speciesID,speciesCode,areaCode) %>%
-#   summarise(n_years = n())
-# #speciesID > 1000 &
-# regions_sel <- tst1 %>%
-#   filter(( areaCode %in% c("Canada", "CAN", "USACAN"))|
-#          (speciesCode %in% c("snogoo") & areaCode %in% c("USACAN")) |
-#            (speciesCode %in% c("gnwtea","rinduc") & areaCode %in% c("CANPRAIRIE_WBOREAL")) )
-# # filter the indices to only the national-assessment regions
-# tst <- tst %>%
-#   inner_join(.,regions_sel,
-#              by = c("speciesID","speciesCode","areaCode"))
-
-## test to make sure manual process worked
-# tst1 <- tst %>%
-#   group_by(speciesID,speciesCode,areaCode) %>%
-#   summarise(n_years = n())
-# if(max(tst1$n_years) > 53){
-#   stop("Some species have too many years of data")
-# }
-# ## end test
-
-
-# select indices for species with only one region
-# tst2 <- goal_indices_tbl %>%
-#   filter(!speciesID %in% sp_gt_1_pop$speciesID)
 
 # combine indices for species with one region with national scale indices for species with >1 region
 all_inds <- goal_indices_tbl %>%
@@ -227,14 +222,13 @@ if(nrow(miss_inds) > 0){
   miss_sp <- unique(miss_inds$speciesCode)
   all_inds <- all_inds %>%
     rowwise() %>%
-    mutate(ifelse(indexLowerCI == 0,max(0.1,index-indexUpperCI),indexLowerCI)) #fixes lower bound for a handful of
+    mutate(indexLowerCI = ifelse(indexLowerCI == 0,max(0.1,index-indexUpperCI),indexLowerCI)) #fixes lower bound for a handful of
   warning(paste((paste(miss_sp,collapse = ", ")),"had missing index or CI information, that should be repaired in the next step"))
 }
 
 all_inds <- all_inds %>%
   filter(index > 0, indexLowerCI > 0)
 
-saveRDS(all_inds,"data/all_socb_goal_indices.rds")
 # Generate species-level smooths ------------------------------------------
 
 
@@ -248,11 +242,30 @@ all_inds <- all_inds %>%
          ln_uci = log(indexUpperCI),
          ln_index_sd = (ln_uci-ln_lci)/3.9) %>%
   group_by(speciesID) %>%
+  filter(speciesCode != "norcro") %>%
   mutate(yearn = year-(min(year)-1)) %>% # sets a yearn value specific to each species
   arrange(speciesID,year)
 
+saveRDS(all_inds,"data/all_socb_goal_indices.rds")
+
+
+# export original indices for WWF -----------------------------------------
+
+all_inds_wwf <- all_inds %>%
+  select(english_name,french_name,scientific_name,speciesCode,
+         year, index, indexUpperCI, indexLowerCI,
+         resultsCode,population,areaCode,trendID,speciesID)
+
+write_excel_csv(all_inds_wwf,
+                "all_2024_stateofCanadasBirds_indices.csv")
+
 all_sp <- unique(all_inds$speciesID)
 all_smoothed_indices <- NULL
+
+
+
+if(re_smooth){
+  # Generate species-level smooths ------------------------------------------
 
 for(species in all_sp){
 
@@ -390,27 +403,12 @@ all_smoothed_indices <- readRDS("socb_smoothed_indices.rds") %>%
 
 
 
+all_ind_compare <- all_smoothed_indices %>%
+  inner_join(., all_inds)
+
 
 # Group-level models ------------------------------------------------------
 
-if(re_download){
-# Species groups
-species_groups <- nc_query_table(table = "SocbTrendGroups",
-                                 username = "adam.smith") %>%
-  rename_with(., .fn = specid_rename) %>%
-  mutate(groupName = gsub("\r\n",
-                          "",
-                          x = groupName,
-                          fixed = TRUE),
-         groupNameFr = gsub("\r\n",
-                          "",
-                          x = groupNameFr,
-                          fixed = TRUE))
-
-saveRDS(species_groups,"data/species_groups.rds")
-}else{
-  species_groups <- readRDS("data/species_groups.rds")
-}
 
 species_non_native <- data.frame(english_name =
                                 c("Mute Swan",
@@ -443,38 +441,38 @@ for(j in 1:nrow(species_non_native)){
 
 
 # # remove non-native and range expansion species
-
-species_to_drop <- data.frame(english_name =
-                                c("Wild Turkey",
-"Anna's Hummingbird",
-"Black-necked Stilt",
-"Great Egret",
-"White-faced Ibis",
-"Red-bellied Woodpecker",
-"Bushtit",
-"Carolina Wren",
-"Blue-gray Gnatcatcher",
-"Blue-winged Warbler",
-"Gray Flycatcher"))
-
-ss_track <- NULL
-for(j in 1:nrow(species_to_drop)){
-  ss <- naturecounts::search_species(as.character(species_to_drop[j,"english_name"]))
-
-  if(nrow(ss) > 1){
-    ss_sel <- which(ss$english_name == as.character(species_to_drop[j,"english_name"]))
-  }else{
-    ss_sel <- 1
-  }
-  species_to_drop[j,"speciesID"] <- ss[ss_sel,"species_id"]
-  species_to_drop[j,"english_name"] <- ss[ss_sel,"english_name"]
-
-  ss_track <- bind_rows(ss_track,ss)
-}
-
-
-species_to_drop
-
+#
+# species_to_drop <- data.frame(english_name =
+#                                 c("Wild Turkey",
+# "Anna's Hummingbird",
+# "Black-necked Stilt",
+# "Great Egret",
+# "White-faced Ibis",
+# "Red-bellied Woodpecker",
+# "Bushtit",
+# "Carolina Wren",
+# "Blue-gray Gnatcatcher",
+# "Blue-winged Warbler",
+# "Gray Flycatcher"))
+#
+# ss_track <- NULL
+# for(j in 1:nrow(species_to_drop)){
+#   ss <- naturecounts::search_species(as.character(species_to_drop[j,"english_name"]))
+#
+#   if(nrow(ss) > 1){
+#     ss_sel <- which(ss$english_name == as.character(species_to_drop[j,"english_name"]))
+#   }else{
+#     ss_sel <- 1
+#   }
+#   species_to_drop[j,"speciesID"] <- ss[ss_sel,"species_id"]
+#   species_to_drop[j,"english_name"] <- ss[ss_sel,"english_name"]
+#
+#   ss_track <- bind_rows(ss_track,ss)
+# }
+#
+#
+# species_to_drop
+# #
 species_groups <- species_groups %>%
   mutate(include = ifelse(speciesID %in% species_non_native$speciesID,
                           "N",include))
@@ -495,8 +493,12 @@ composite_plots <- vector('list',length(groups_to_fit))
 names(composite_plots) <- groups_to_fit
 annual_status_combine <- NULL
 
-re_fit <- TRUE
 
+
+
+re_fit_all <- FALSE
+
+groups_to_refit <- groups_to_fit[c(16,18,7)]
 
 pdf("figures/composite_summary_plots.pdf",
     width = 8.5,
@@ -504,8 +506,7 @@ pdf("figures/composite_summary_plots.pdf",
 for(grp in groups_to_fit){
 
   sub_groups_to_fit <- species_groups %>%
-    filter(groupName == grp,
-           !speciesID %in% species_to_drop$speciesID) %>%
+    filter(groupName == grp) %>%
     select(subgroupID) %>%
     distinct() %>%
     #filter(subgroupID!= "NULL") %>%
@@ -527,8 +528,7 @@ for(grp in groups_to_fit){
   species_sel <- species_groups %>%
     filter(groupName == grp,
            subgroupID == sub_grp,
-           include == "Y",
-           !speciesID %in% species_to_drop$speciesID) %>%
+           include == "Y") %>%
     distinct()
 
 
@@ -588,7 +588,6 @@ sp_y <- inds %>%
             first_yearn2 = min(yearn2),
             last_yearn2 = max(yearn2),
             .groups = "drop")
-if(re_fit){
 
 # number of years and species
 n_years <- max(inds$yearn2,na.rm = TRUE)
@@ -605,6 +604,11 @@ ln_index_sd <- matrix(data = 0,
                       nrow = n_years,
                       ncol = n_species)
 n_species_year <- vector("integer",length = n_years)
+
+re_fit <- ifelse(re_fit_all | grp %in% groups_to_refit,
+                 TRUE,FALSE)
+if(re_fit){
+
 for(y in 1:n_years){
   tmp <- inds %>%
     filter(yearn2 == y) %>%
@@ -778,6 +782,24 @@ if(fit_alternate_socb_model){
            percent_diff_lci = (exp(q2_5)-1)*100,
            percent_diff_uci = (exp(q97_5)-1)*100)
 
+
+
+
+
+
+  sigma2 <- sum2 %>%
+    filter(grepl("sigma",variable))
+
+  annual_status_standard <- annual_status_standard %>%
+    mutate(groupName = grp,
+           subgroupID = sub_grp)
+  # inds_all <- inds_all %>%
+  #   mutate(groupName = grp,
+  #          subgroupID = sub_grp)
+  # species_sel <- species_sel %>%
+  #   mutate(groupName = grp,
+  #          subgroupID = sub_grp)
+  #
   saveRDS(annual_status_standard,paste0("output/composite_fit_standard_",grp_labl,".rds"))
 
   annual_status_combine <- bind_rows(annual_status_difference,
@@ -877,3 +899,5 @@ dev.off()
 #
 
 saveRDS(annual_status_combine,"output/annual_status_combine.rds")
+
+
