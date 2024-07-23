@@ -117,14 +117,15 @@ if(re_download){
   species_groups <- readRDS("data/species_groups.rds")
 
 
-  species_names <- naturecounts::search_species() %>%
+ if(re_download){
+   species_names <- naturecounts::search_species() %>%
     rename_with(.,.fn = specid_rename) %>%
     filter(speciesID %in% species_groups$speciesID)
 
   saveRDS(species_names,"data/species_names.rds")
+}
 
-
-
+  species_names <- readRDS("data/species_names.rds")
 
 
   rank_tbl <- rank_tbl %>%
@@ -498,7 +499,8 @@ annual_status_combine <- NULL
 
 re_fit_all <- FALSE
 
-groups_to_refit <- groups_to_fit[c(16,18,7)]
+groups_to_refit <- groups_to_fit[c(15)] #NULL #
+#groups_to_refit <- NULL
 
 pdf("figures/composite_summary_plots.pdf",
     width = 8.5,
@@ -831,12 +833,29 @@ capt <- paste(capt_en,"\n",capt_fr)
 ylimu <- max(annual_status_difference$q97_5,1.1)
 yliml <- min(annual_status_difference$q2_5,-1.1)
 
+ylimu_spag <- max(inds_all$scaled_status)
+yliml_spag <- min(inds_all$scaled_status)
+
+
+if(grp == "Residents: All"){
+  yliml_spag <- log((-90/100)+1)
+  y_sub <- inds_all %>%
+    filter(speciesID == 1410,
+           scaled_status > yliml) %>%
+    summarise(last_year = max(year))
+  sp_y <- sp_y %>%
+    mutate(last_year = ifelse(speciesID != 1410,
+                              last_year,
+                              y_sub$last_year))
+
+}
 
 inds_label <- inds_all %>%
-    inner_join(.,sp_y,
-               by = c("species_ind",
-                      "speciesID",
-                      "year" = "last_year"))
+  inner_join(.,sp_y,
+             by = c("species_ind",
+                    "speciesID",
+                    "year" = "last_year"))
+
 
   tst <- ggplot(data = annual_status_difference,
                 aes(x = year,y = mean))+
@@ -876,8 +895,9 @@ inds_label <- inds_all %>%
               segment.alpha = 0.3,
               segment.size = 0.2)+
     scale_y_continuous(breaks = brks_log,
-                       labels = brks_labs)+
-    scale_x_continuous(limits = c(1970,2062))+
+                       labels = brks_labs,
+                       limits = c(yliml_spag,ylimu_spag))+
+    scale_x_continuous(limits = c(1970,2055))+
     labs(title = paste(grp_labl))+
     xlab("")+
     theme_bw()

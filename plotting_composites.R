@@ -66,7 +66,9 @@ all_composites_out <- all_composites %>%
   relocate(groupName,groupID,subgroupID,year,
            log_scale_indicator,log_scale_indicator_sd,log_scale_indicator_lci,log_scale_indicator_uci,
            percent_diff, percent_diff_lci, percent_diff_uci) %>%
-  select(-c(ess_bulk,rhat,yearn2,model,variable))
+  select(-c(ess_bulk,rhat,yearn2,model,variable)) %>%
+  mutate(across(log_scale_indicator:percent_diff_uci,
+                .fns = ~signif(.x,digits = 3)))
 write_csv(all_composites_out,"output/composite_indicators_all.csv")
 
 
@@ -84,10 +86,12 @@ main_groups <- species_groups %>%
 
 
 out_composites <- all_composites %>%
-  select(groupName,year,mean,q2_5,q97_5,percent_diff,percent_diff_lci,percent_diff_uci)
-write_csv(out_composites,
-          "output/saved_draft_composite_trajectories.csv")
-
+  select(groupName,year,mean,q2_5,q97_5,percent_diff,percent_diff_lci,percent_diff_uci) %>%
+  mutate(across(mean:percent_diff_uci,
+                .fns = ~signif(.x,digits = 3)))
+# write_csv(out_composites,
+#           "output/saved_draft_composite_trajectories.csv")
+#
 
 high_level_groups <- main_groups[c(1,2,3,4,5,6,7,8,9,13)]
 main_composites <- all_composites %>%
