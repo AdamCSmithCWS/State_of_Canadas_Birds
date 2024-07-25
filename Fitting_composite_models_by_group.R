@@ -141,7 +141,8 @@ sp_simple <- sp_tbl %>%
          population,
          objective,
          popID,
-         popType) %>% #,population,popType,popID) %>%
+         popType,
+         confidence) %>% #,population,popType,popID) %>%
   filter(popType == 1) %>%
   left_join(.,species_names) %>%
   distinct()
@@ -263,7 +264,9 @@ write_excel_csv(all_inds_wwf,
 all_sp <- unique(all_inds$speciesID)
 all_smoothed_indices <- NULL
 
-
+species_confidence <- all_inds %>%
+  select(speciesID,confidence) %>%
+  distinct()
 
 if(re_smooth){
   # Generate species-level smooths ------------------------------------------
@@ -478,6 +481,8 @@ species_groups <- species_groups %>%
   mutate(include = ifelse(speciesID %in% species_non_native$speciesID,
                           "N",include))
 
+
+
 species_groups <- species_groups %>%
   filter(popType == 1) %>%
   mutate(subgroupID = ifelse(groupName == "Wetland Birds: All",
@@ -499,8 +504,11 @@ annual_status_combine <- NULL
 
 re_fit_all <- FALSE
 
-groups_to_refit <- groups_to_fit[c(15)] #NULL #
-#groups_to_refit <- NULL
+#groups_to_refit <- groups_to_fit[c(15)] #NULL #
+groups_to_refit <- NULL
+
+drop_low_confidence <- TRUE
+low_confid <- c("DD","VL","L ")
 
 pdf("figures/composite_summary_plots.pdf",
     width = 8.5,
@@ -527,13 +535,25 @@ for(grp in groups_to_fit){
 
 
 
+
   species_sel <- species_groups %>%
     filter(groupName == grp,
            subgroupID == sub_grp,
            include == "Y") %>%
     distinct()
 
+  # Dropping low confidence species -----------------------------------------
 
+  if(drop_low_confidence){
+sp_drop_low_confidence <- species_confidence %>%
+  filter(confidence %in% low_confid) %>%
+  select(speciesID) %>%
+  unlist
+
+
+  }else{
+    sp_drop_low_confidence <- NULL
+  }
 
   if(nrow(species_sel) == 0){next}
   if(nrow(species_sel) != length(unique(species_sel$speciesID))){
@@ -541,24 +561,31 @@ for(grp in groups_to_fit){
   }
   n_sp_w_data <- length(which(species_sel$speciesID %in% all_smoothed_indices$speciesID))
 
-  print(paste("There are data for",n_sp_w_data,"of",nrow(species_sel),
-              "in the",grp,sub_grp,"group"))
 
   species_sel <- species_sel %>%
     mutate(sufficient_data = ifelse(speciesID %in% all_smoothed_indices$speciesID,
                                     TRUE,
-                                    FALSE)) %>%
+                                    FALSE),
+           sufficient_confidence = ifelse(speciesID %in% sp_drop_low_confidence,
+                                   FALSE,
+                                   TRUE)) %>%
     left_join(.,species_names,
               by = "speciesID") %>%
     select(-taxon_group)
 
-if(n_sp_w_data/nrow(species_sel) < 0.2){
-  print(paste("Skipping",grp,sub_grp,"because only",round(n_sp_w_data/nrow(species_sel),2)*100,"% of species have data"))
+  n_sp_w_low_conf <- length(which(species_sel$speciesID %in% sp_drop_low_confidence))
+
+  print(paste("There are data for",(n_sp_w_data-n_sp_w_low_conf),"of",nrow(species_sel),
+              "in the",grp,sub_grp,"group"))
+
+if((n_sp_w_data-n_sp_w_low_conf)/nrow(species_sel) < 0.2){
+  print(paste("Skipping",grp,sub_grp,"because only",round((n_sp_w_data-n_sp_w_low_conf)/nrow(species_sel),2)*100,"% of species have data"))
     next}
 
   ### Drop the base-year values and other species
 inds_all <- all_smoothed_indices %>%
-  filter(speciesID %in% species_sel$speciesID) %>%
+  filter(speciesID %in% species_sel$speciesID,
+         !speciesID %in% sp_drop_low_confidence) %>%
   mutate(species_ind = as.integer(factor(speciesID)))#
 
 years_w_GT_50 <- inds_all %>%
@@ -582,6 +609,7 @@ inds <- inds_all %>%
          annual_diff_sd > 0) %>%
   arrange(species_ind,yearn2)
 
+
 ## track the start and end years for each species
 sp_y <- inds %>%
   group_by(species_ind,speciesID) %>%
@@ -589,6 +617,23 @@ sp_y <- inds %>%
             last_year = max(year),
             first_yearn2 = min(yearn2),
             last_yearn2 = max(yearn2),
+            .groups = "drop")
+
+inds_w_low_conf <- all_smoothed_indices %>%
+  filter(speciesID %in% species_sel$speciesID) %>%
+  group_by(speciesID) %>%
+  mutate(yearn2 = year-(base_yr-1)) %>%
+  filter(year <= max_yr,
+         year >= base_yr,
+         scaled_log_status_sd > 0,
+         scaled_status_sd > 0,
+         annual_diff_sd > 0) %>%
+  arrange(speciesID,yearn2)
+
+sp_y_low_conf <- inds_w_low_conf %>%
+  group_by(speciesID) %>%
+  summarise(first_year = min(year),
+            last_year = max(year),
             .groups = "drop")
 
 # number of years and species
@@ -698,12 +743,14 @@ species_sel <- species_sel %>%
 
   saveRDS(annual_status_difference,paste0("output/composite_fit_",grp_labl,".rds"))
   saveRDS(inds_all,paste0("output/composite_data_",grp_labl,".rds"))
+  saveRDS(inds_w_low_conf,paste0("output/composite_data_w_low_confid_",grp_labl,".rds"))
   saveRDS(species_sel,paste0("output/composite_species_list_",grp_labl,".rds"))
 
     }else{#end if re-fit
       annual_status_difference <- readRDS(paste0("output/composite_fit_",grp_labl,".rds"))
       inds_all <- readRDS(paste0("output/composite_data_",grp_labl,".rds"))
       species_sel <- readRDS(paste0("output/composite_species_list_",grp_labl,".rds"))
+      inds_w_low_conf <- readRDS(paste0("output/composite_data_w_low_confid_",grp_labl,".rds"))
 
 
     }
@@ -828,13 +875,43 @@ species_miss_fr <- species_sel %>%
 capt_en <- paste("No data:",paste(species_miss_en,collapse = ", "))
 capt_fr <- paste("Pas de données:",paste(species_miss_fr,collapse = ", "))
 
-capt <- paste(capt_en,"\n",capt_fr)
+
+species_miss_en2 <- species_sel %>%
+  filter(sufficient_confidence == FALSE) %>%
+  select(english_name) %>%
+  unlist()
+
+species_miss_fr2 <- species_sel %>%
+  filter(sufficient_confidence == FALSE) %>%
+  select(french_name) %>%
+  unlist()
+
+
+capt2_en <- paste("Low Confidence:",paste(species_miss_en2,collapse = ", "))
+capt2_fr <- paste("faible confiance:",paste(species_miss_fr2,collapse = ", "))
+
+capt <- paste(capt_en,"\n",capt2_en,
+              "\n",capt_fr,"\n",capt2_fr)
 
 ylimu <- max(annual_status_difference$q97_5,1.1)
 yliml <- min(annual_status_difference$q2_5,-1.1)
 
-ylimu_spag <- max(inds_all$scaled_status)
-yliml_spag <- min(inds_all$scaled_status)
+inds_all_plot <- all_smoothed_indices %>%
+  filter(speciesID %in% species_sel$speciesID) %>%
+  mutate(Low_confidence = ifelse(speciesID %in% sp_drop_low_confidence,
+                             TRUE,
+                             FALSE))
+
+
+inds_label <- inds_all_plot %>%
+  inner_join(.,sp_y_low_conf,
+             by = c("speciesID",
+                    "year" = "last_year"))
+
+
+
+ylimu_spag <- max(inds_all_plot$scaled_status)
+yliml_spag <- min(inds_all_plot$scaled_status)
 
 
 if(grp == "Residents: All"){
@@ -849,13 +926,6 @@ if(grp == "Residents: All"){
                               y_sub$last_year))
 
 }
-
-inds_label <- inds_all %>%
-  inner_join(.,sp_y,
-             by = c("species_ind",
-                    "speciesID",
-                    "year" = "last_year"))
-
 
   tst <- ggplot(data = annual_status_difference,
                 aes(x = year,y = mean))+
@@ -875,9 +945,10 @@ inds_label <- inds_all %>%
   tst2 <- ggplot(data = annual_status_difference,
                 aes(x = year,y = mean))+
     geom_hline(yintercept = 0)+
-    geom_line(data = inds_all,
+    geom_line(data = inds_all_plot,
               aes(x = year,y = scaled_status,
-                  group = species_ind),
+                  group = speciesID,
+                  colour = Low_confidence),
               alpha = 0.2,
               inherit.aes = FALSE)+
     geom_ribbon(aes(ymin = q2_5,ymax = q97_5),
@@ -885,7 +956,8 @@ inds_label <- inds_all %>%
     geom_line()+
     ggrepel::geom_text_repel(data = inds_label,
               aes(x = year,y = scaled_status,
-                  label = english_name),
+                  label = english_name,
+                  colour = Low_confidence),
               size = 1.5,
               max.overlaps = 30,
               min.segment.length = 0,
@@ -898,9 +970,12 @@ inds_label <- inds_all %>%
                        labels = brks_labs,
                        limits = c(yliml_spag,ylimu_spag))+
     scale_x_continuous(limits = c(1970,2055))+
+    scale_colour_viridis_d(begin = 0,end = 0.9,
+                           direction = 1)+
     labs(title = paste(grp_labl))+
     xlab("")+
-    theme_bw()
+    theme_bw()+
+    theme(legend.position = "none")
 
   #tst2
 
