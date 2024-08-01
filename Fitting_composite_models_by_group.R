@@ -92,7 +92,8 @@ if(re_download){
            groupNameFr = gsub("\r\n",
                               "",
                               x = groupNameFr,
-                              fixed = TRUE))
+                              fixed = TRUE),
+           include = toupper(include))
 
 
   saveRDS(species_groups,"data/species_groups.rds")
@@ -231,8 +232,6 @@ if(nrow(miss_inds) > 0){
 all_inds <- all_inds %>%
   filter(index > 0, indexLowerCI > 0)
 
-# Generate species-level smooths ------------------------------------------
-
 
 #all_inds <- readRDS("data/Canadian_BBS_indices.rds")
 
@@ -267,6 +266,12 @@ all_smoothed_indices <- NULL
 species_confidence <- all_inds %>%
   select(speciesID,confidence) %>%
   distinct()
+
+
+
+
+# Generate species-level smooths ------------------------------------------
+
 
 if(re_smooth){
   # Generate species-level smooths ------------------------------------------
@@ -484,9 +489,21 @@ species_groups <- species_groups %>%
 
 
 species_groups <- species_groups %>%
-  filter(popType == 1) %>%
-  mutate(subgroupID = ifelse(groupName == "Wetland Birds: All",
-                             0,subgroupID))
+   filter(popType == 1) %>%
+  filter(!(subgroupID != 0 & groupName == "Wetland Birds: All"))
+
+test <- species_groups %>%
+  group_by(subgroupID,groupName) %>%
+  summarise(n = n())
+test2 <- species_groups %>%
+  group_by(speciesID) %>%
+  summarise(n = n())
+## only missing species are parakeet auklet and mountain plover
+## neither are included in any group, so not necessary to fix
+##
+#%>%
+  # mutate(subgroupID = ifelse(groupName == "Wetland Birds: All",
+  #                            0,subgroupID))
 # species_groups <- read_xlsx("data/SOCB_AnalysisGroups.xlsx") %>%
 #   mutate(groupName = gsub("/",x = groupName,
 #                            replacement = "_",fixed = TRUE)) #remvoing the special character in "Edge/Early"
@@ -504,28 +521,40 @@ annual_status_combine <- NULL
 
 re_fit_all <- FALSE
 
-#groups_to_refit <- groups_to_fit[c(15)] #NULL #
+#groups_to_refit <- groups_to_fit[c(51,52,53,8,9,10,55)] #NULL #
 groups_to_refit <- NULL
 
 drop_low_confidence <- TRUE
-low_confid <- c("DD","VL","L ")
+low_confid <- c("DD")
+plot_low_confidence <- FALSE
+if(!plot_low_confidence){
+
+  sp_drop_low_confidence <- species_confidence %>%
+    filter(confidence %in% low_confid) %>%
+    select(speciesID) %>%
+    unlist
+
+  all_smoothed_indices <- all_smoothed_indices %>%
+  filter(!speciesID %in% sp_drop_low_confidence)
+}
+
 
 pdf("figures/composite_summary_plots.pdf",
     width = 8.5,
     height = 11)
 for(grp in groups_to_fit){
 
-  sub_groups_to_fit <- species_groups %>%
+  sub_grp <- species_groups %>%
     filter(groupName == grp) %>%
     select(subgroupID) %>%
     distinct() %>%
     #filter(subgroupID!= "NULL") %>%
-    unlist()
+    unlist() %>%
+    as.integer()
 
-  for(sub_grp in sub_groups_to_fit){
+  #for(sub_grp in sub_groups_to_fit){
     grp_labl <- species_groups %>%
-      filter(groupName == grp,
-             subgroupID == sub_grp) %>%
+      filter(groupName == grp) %>%
       select(groupName,groupNameFr) %>%
       distinct() %>%
       unlist()
@@ -538,7 +567,6 @@ for(grp in groups_to_fit){
 
   species_sel <- species_groups %>%
     filter(groupName == grp,
-           subgroupID == sub_grp,
            include == "Y") %>%
     distinct()
 
@@ -557,7 +585,7 @@ sp_drop_low_confidence <- species_confidence %>%
 
   if(nrow(species_sel) == 0){next}
   if(nrow(species_sel) != length(unique(species_sel$speciesID))){
-    stop(paste("Problem with species list for",grp,sub_grp))
+    stop(paste("Problem with species list for",grp))
   }
   n_sp_w_data <- length(which(species_sel$speciesID %in% all_smoothed_indices$speciesID))
 
@@ -576,10 +604,10 @@ sp_drop_low_confidence <- species_confidence %>%
   n_sp_w_low_conf <- length(which(species_sel$speciesID %in% sp_drop_low_confidence))
 
   print(paste("There are data for",(n_sp_w_data-n_sp_w_low_conf),"of",nrow(species_sel),
-              "in the",grp,sub_grp,"group"))
+              "in the",grp,"group"))
 
 if((n_sp_w_data-n_sp_w_low_conf)/nrow(species_sel) < 0.2){
-  print(paste("Skipping",grp,sub_grp,"because only",round((n_sp_w_data-n_sp_w_low_conf)/nrow(species_sel),2)*100,"% of species have data"))
+  print(paste("Skipping",grp,"because only",round((n_sp_w_data-n_sp_w_low_conf)/nrow(species_sel),2)*100,"% of species have data"))
     next}
 
   ### Drop the base-year values and other species
@@ -688,7 +716,9 @@ mod2 <- cmdstan_model(file2)
 fit2 <- mod2$sample(data = stan_data2,
                     parallel_chains = 4,
                     refresh = 0,
-                    adapt_delta = 0.8)
+                    adapt_delta = 0.9,
+                    iter_warmup = 2000,
+                    iter_sampling = 2000)
 
 sum2 <- fit2$summary(variables = NULL,
                      "mean",
@@ -699,12 +729,12 @@ sum2 <- fit2$summary(variables = NULL,
                      q97_5 = q97_5)
 
 mx_rhat2 <- max(sum2$rhat,na.rm = TRUE)
-if(mx_rhat2 > 1.05){
+if(mx_rhat2 > 1.02){
   fit2 <- mod2$sample(data = stan_data2,
                      parallel_chains = 4,
-                     iter_warmup = 8000,
-                     iter_sampling = 8000,
-                     thin = 8,
+                     iter_warmup = 4000,
+                     iter_sampling = 4000,
+                     thin = 2,
                      refresh = 0)
   sum2 <- fit2$summary(variables = NULL,
                        "mean",
@@ -793,7 +823,9 @@ if(fit_alternate_socb_model){
   fit <- mod$sample(data = stan_data,
                     parallel_chains = 4,
                     refresh = 0,
-                    adapt_delta = 0.8)
+                    adapt_delta = 0.8,
+                    iter_warmup = 2000,
+                    iter_sampling = 2000)
 
   sum <- fit$summary(variables = NULL,
                      "mean",
@@ -857,6 +889,11 @@ if(fit_alternate_socb_model){
 }else{
   annual_status_combine <- bind_rows(annual_status_combine,annual_status_difference)
 }
+
+
+# plotting ----------------------------------------------------------------
+
+
   brks_pch <- c(-95,-90,-75,-50,-40,-25,0,25,50,100,200,300,500)
   brks_log <- log((brks_pch/100)+1)
   brks_labs <- paste0(brks_pch,"%")
@@ -887,8 +924,8 @@ species_miss_fr2 <- species_sel %>%
   unlist()
 
 
-capt2_en <- paste("Low Confidence:",paste(species_miss_en2,collapse = ", "))
-capt2_fr <- paste("faible confiance:",paste(species_miss_fr2,collapse = ", "))
+capt2_en <- paste("Data Defficient:",paste(species_miss_en2,collapse = ", "))
+capt2_fr <- paste("Données Insuffisantes:",paste(species_miss_fr2,collapse = ", "))
 
 capt <- paste(capt_en,"\n",capt2_en,
               "\n",capt_fr,"\n",capt2_fr)
@@ -906,26 +943,57 @@ inds_all_plot <- all_smoothed_indices %>%
 inds_label <- inds_all_plot %>%
   inner_join(.,sp_y_low_conf,
              by = c("speciesID",
-                    "year" = "last_year"))
-
+                    "year" = "last_year"))%>%
+  mutate(percent_dif = round((exp(scaled_status)-1)*100),
+         lbl = paste0(english_name,":",percent_dif,"%"),
+         qual_dif = ifelse(percent_dif > 0,1,-1))
 
 
 ylimu_spag <- max(inds_all_plot$scaled_status)
 yliml_spag <- min(inds_all_plot$scaled_status)
 
 
-if(grp == "Residents: All"){
+if(grp == "Long Distance Migrants : Residents"){
   yliml_spag <- log((-90/100)+1)
   y_sub <- inds_all %>%
     filter(speciesID == 1410,
            scaled_status > yliml) %>%
     summarise(last_year = max(year))
-  sp_y <- sp_y %>%
+
+  sp_y_low_conf <- sp_y_low_conf %>%
     mutate(last_year = ifelse(speciesID != 1410,
                               last_year,
-                              y_sub$last_year))
+                         y_sub$last_year))
+
+
+  inds_label <- inds_all_plot %>%
+    inner_join(.,sp_y_low_conf,
+               by = c("speciesID",
+                      "year" = "last_year")) %>%
+    mutate(percent_dif = signif((exp(scaled_status)-1)*100,2),
+           lbl = paste0(english_name,":",percent_dif,"%"),
+           qual_dif = ifelse(percent_dif > 0,1,-1),
+           lbl = ifelse(speciesID != 1410,
+                              lbl,
+                        english_name))
+
 
 }
+
+quals <- data.frame(qual_dif = c(-1,1))
+qual <- inds_label %>%
+  select(speciesID,qual_dif) %>%
+  distinct() %>%
+  bind_rows(.,quals)
+
+inds_all_plot <- inds_all_plot %>%
+  full_join(.,qual,
+            by = "speciesID")
+
+full_lbl <- annual_status_difference %>%
+  filter(year == max(year)) %>%
+  mutate(lbl = paste0(signif(percent_diff,2),"%"),
+         year = year+3)
 
   tst <- ggplot(data = annual_status_difference,
                 aes(x = year,y = mean))+
@@ -936,6 +1004,9 @@ if(grp == "Residents: All"){
     scale_y_continuous(breaks = brks_log,
                        labels = brks_labs,
                        limits = c(yliml,ylimu))+
+    geom_text(data = full_lbl,
+                             aes(x = year,y = mean,
+                                 label = lbl))+
     labs(title = paste(grp_labl),
          caption = capt)+
     xlab("")+
@@ -948,16 +1019,16 @@ if(grp == "Residents: All"){
     geom_line(data = inds_all_plot,
               aes(x = year,y = scaled_status,
                   group = speciesID,
-                  colour = Low_confidence),
-              alpha = 0.2,
+                  colour = qual_dif),
+              alpha = 0.3,
               inherit.aes = FALSE)+
     geom_ribbon(aes(ymin = q2_5,ymax = q97_5),
                 alpha = 0.5)+
     geom_line()+
     ggrepel::geom_text_repel(data = inds_label,
               aes(x = year,y = scaled_status,
-                  label = english_name,
-                  colour = Low_confidence),
+                  label = lbl,
+                  colour = qual_dif),
               size = 1.5,
               max.overlaps = 30,
               min.segment.length = 0,
@@ -970,8 +1041,14 @@ if(grp == "Residents: All"){
                        labels = brks_labs,
                        limits = c(yliml_spag,ylimu_spag))+
     scale_x_continuous(limits = c(1970,2055))+
-    scale_colour_viridis_d(begin = 0,end = 0.9,
-                           direction = 1)+
+    # scale_colour_viridis_d(begin = 0,end = 0.9,
+    #                        direction = 1)+
+    # scale_color_brewer(palette = "RdBu",
+    #                    type = "div",
+    #                    values = c(0,1))+
+    colorspace::scale_color_continuous_diverging(rev = TRUE,
+                                                 mid = 0,
+                                                 n_interp = 3)+
     labs(title = paste(grp_labl))+
     xlab("")+
     theme_bw()+
@@ -985,7 +1062,7 @@ if(grp == "Residents: All"){
 composite_plots[[grp]] <- tst2
 
 
-}
+#}
 
 }
 
