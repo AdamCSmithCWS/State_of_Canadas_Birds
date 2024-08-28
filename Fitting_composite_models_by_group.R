@@ -18,26 +18,14 @@ q97_5 <- function(x)c(q97_5 = quantile(x,probs = c(0.975),
 
 
 base_year <- 1970
-fit_alternate_socb_model <- FALSE #use TRUE if traditional SOCB model is desired
+fit_alternate_socb_model <- TRUE #use TRUE if traditional SOCB model is desired
 re_smooth <- FALSE
 
 
 
 # extract state of canada's birds -----------------------------------------
 re_download <- FALSE
-
-specid_rename <- function(x){
-  y <- vector("character",length(x))
-  for(i in 1:length(x)){
-    if(grepl("speciesId",x[i]) |
-       grepl("species_id",x[i])){
-      y[i] <- "speciesID"
-    }else{
-      y[i] <- x[i]
-    }
-  }
-  return(y)
-}
+source("functions/specid_rename.R")
 
 if(re_download){
 
@@ -521,8 +509,8 @@ annual_status_combine <- NULL
 
 re_fit_all <- FALSE
 
-#groups_to_refit <- groups_to_fit[c(51,52,53,8,9,10,55)] #NULL #
-groups_to_refit <- NULL
+groups_to_refit <- groups_to_fit[c(33)] #NULL #
+#groups_to_refit <- NULL
 
 drop_low_confidence <- TRUE
 low_confid <- c("DD")
@@ -763,7 +751,8 @@ sigma2 <- sum2 %>%
 
 annual_status_difference <- annual_status_difference %>%
   mutate(groupName = grp,
-         subgroupID = sub_grp)
+         subgroupID = sub_grp,
+         model = "difference")
 inds_all <- inds_all %>%
   mutate(groupName = grp,
          subgroupID = sub_grp)
@@ -825,7 +814,7 @@ if(fit_alternate_socb_model){
                     refresh = 0,
                     adapt_delta = 0.8,
                     iter_warmup = 2000,
-                    iter_sampling = 2000)
+                    iter_sampling = 4000)
 
   sum <- fit$summary(variables = NULL,
                      "mean",
@@ -873,7 +862,8 @@ if(fit_alternate_socb_model){
 
   annual_status_standard <- annual_status_standard %>%
     mutate(groupName = grp,
-           subgroupID = sub_grp)
+           subgroupID = sub_grp,
+           model = "standard")
   # inds_all <- inds_all %>%
   #   mutate(groupName = grp,
   #          subgroupID = sub_grp)
@@ -1059,9 +1049,30 @@ full_lbl <- annual_status_difference %>%
   print(tst/
           tst2)
 
+
+
 composite_plots[[grp]] <- tst2
 
-
+if(fit_alternate_socb_model){
+tst3 <- ggplot(data = annual_status_combine,
+              aes(x = year,y = mean))+
+  geom_hline(yintercept = 0)+
+  geom_ribbon(aes(ymin = q2_5,ymax = q97_5,
+                  fill = model),
+              alpha = 0.25)+
+  geom_line(aes(colour = model))+
+  scale_y_continuous(breaks = brks_log,
+                     labels = brks_labs)+
+  geom_text(data = full_lbl,
+            aes(x = year,y = mean,
+                label = lbl))+
+  labs(title = paste(grp_labl),
+       caption = capt)+
+  xlab("")+
+  theme_bw()+
+  theme(plot.caption = element_text(size = 5))
+tst3
+}
 #}
 
 }

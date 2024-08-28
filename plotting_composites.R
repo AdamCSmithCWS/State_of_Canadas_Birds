@@ -6,23 +6,12 @@ library(readxl)
 library(patchwork)
 library(ggrepel)
 
+source("functions/specid_rename.R")
 
 
 base_year <- 1970
 
 
-specid_rename <- function(x){
-  y <- vector("character",length(x))
-  for(i in 1:length(x)){
-    if(grepl("speciesId",x[i]) |
-       grepl("species_id",x[i])){
-      y[i] <- "speciesID"
-    }else{
-      y[i] <- x[i]
-    }
-  }
-  return(y)
-}
 
 sp_tbl <- readRDS("data/SocbSpecies.rds") %>%
   rename_with(.,.fn = specid_rename)
@@ -52,6 +41,7 @@ all_smoothed_indices <- readRDS("socb_smoothed_indices.rds") %>%
 all_composites <- readRDS("output/annual_status_combine.rds")
 
 species_groups <- readRDS("data/species_groups.rds")
+
 groupIDs <- species_groups %>%
   select(groupName,groupID) %>%
   distinct()
@@ -149,91 +139,5 @@ dev.off()
 
 
 
-#
-# # separated plots ------------------------------------------------------------
-#
-# all_composites <- read_csv("output/saved_draft_composite_trajectories.csv") %>%
-#   filter(year < 2023)
-#
-# major_groups <- list(
-#   water = groups_to_fit[c(grep("water",groups_to_fit),
-#             grep("wet",groups_to_fit))],
-#   sea_coast = groups_to_fit[c(grep("seabirds",groups_to_fit),
-#                           grep("shore",groups_to_fit),
-#                           grep("marine",groups_to_fit))],
-#   land = groups_to_fit[c(grep("landbird",groups_to_fit),
-#                           grep("prey",groups_to_fit),
-#                          grep("insect",groups_to_fit),
-#                          grep("general",groups_to_fit),
-#                          grep("all_other",groups_to_fit))],
-#   open = groups_to_fit[c(grep("grass",groups_to_fit),
-#                          grep("shrub",groups_to_fit),
-#                          grep("sage",groups_to_fit),
-#                          grep("arctic",groups_to_fit),
-#                          grep("mountain",groups_to_fit))],
-#   forest = groups_to_fit[c(grep("forest",groups_to_fit))]
-# )
-#
-#
-#
-#
-# brks_pch <- c(-95,-90,-75,-50,-40,-25,0,25,50,100,200,300,500) # values of  percent change I’d like to show on the y-axis
-# brks_log <- log((brks_pch/100)+1) # above values transformed to original log-scale – used to set the breaks in the log-scale graph below.
-# brks_labs <- paste0(brks_pch,"%") # text labels to add to the y-axis
-# pdf("figures/example_composite_trends.pdf",
-#     width = 11,
-#     height = 8.5)
-# for(i in 1:length(major_groups)){
-#
-#   sel <- major_groups[[i]]
-#
-#   sel_comp <- all_composites %>%
-#     filter(groupName %in% sel)
-#
-#
-#   final_years <- sel_comp %>%
-#     group_by(groupName) %>%
-#     summarise(last_year = max(year))
-#
-#   names_plot <- sel_comp %>%
-#     inner_join(.,final_years,
-#                by = c("groupName",
-#                       "year" = "last_year")) %>%
-#     mutate(lbl = paste(groupName,round(percent_diff),"%"))
-#
-# capt <- paste("Missing -",
-#               paste(sel[which(!sel %in% names_plot$groupName)],
-#                     collapse = "; "))
-#
-# overview <- ggplot(data = sel_comp,
-#                    aes(x = year,y = mean, group = groupName,
-#                        colour = groupName))+
-#   geom_hline(yintercept = 0)+
-#   geom_line()+
-#   geom_text(data = names_plot,
-#             aes(label = lbl),nudge_x = 10,
-#             size = 4)+
-#   coord_cartesian(xlim = c(1970,2050))+
-#   theme_bw()+
-#   ylab("")+
-#   xlab("")+
-#   labs(caption = capt)+
-#   scale_y_continuous(breaks = brks_log,
-#                      labels = brks_labs)+
-#   scale_x_continuous(breaks = c(seq(1970,2010,by = 10), 2022),
-#                      minor_breaks = c(seq(1970,2020,by = 5)))+
-#   scale_colour_viridis_d(end = 0.8)+
-#   theme(legend.position = "none")
-#
-#
-# print(overview)
-#
-# }
-#
-#
-# dev.off()
-#
-#
-#
 
 
