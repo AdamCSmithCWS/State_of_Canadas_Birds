@@ -13,7 +13,7 @@ data {
 
 parameters {
   //real<lower=0> sigma;
-  array[n_years] real MU;// mean annual differences
+  array[n_years] real MU;// mean annual status values
   array[n_years] real<lower=0> sigma;    // sd each yearly summary
   array[n_years,n_species] real noise_raw;
 }
@@ -41,9 +41,7 @@ model {
    for(s in species[i,1:n_species_year[i]]){ // stepping through species with data
   ln_index[i,s] ~ normal(ln_index_true[i,s], ln_index_sd[i,s]);
     }
-    // for(s in species[i,n_species_year[i]:n_species]){ //stepping through species that are missing
-    // ln_index_true[i,s] ~ normal(0,1);
-    // }
+
   }
 
   sigma ~ student_t(3,0,1);

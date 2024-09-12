@@ -18,7 +18,7 @@ q97_5 <- function(x)c(q97_5 = quantile(x,probs = c(0.975),
 
 
 base_year <- 1970
-fit_alternate_socb_model <- TRUE #use TRUE if traditional SOCB model is desired
+fit_alternate_socb_model <- FALSE #use TRUE if traditional SOCB model is desired
 re_smooth <- FALSE
 
 
@@ -507,10 +507,10 @@ annual_status_combine <- NULL
 
 
 
-re_fit_all <- FALSE
+re_fit_all <- TRUE
 
-groups_to_refit <- groups_to_fit[c(33)] #NULL #
-#groups_to_refit <- NULL
+#groups_to_refit <- groups_to_fit[c(33)] #NULL #
+groups_to_refit <- NULL
 
 drop_low_confidence <- TRUE
 low_confid <- c("DD")
@@ -526,10 +526,16 @@ if(!plot_low_confidence){
   filter(!speciesID %in% sp_drop_low_confidence)
 }
 
-
+if(fit_alternate_socb_model){
+pdf("figures/composite_summary_plots_comparing_models.pdf",
+    width = 8.5,
+    height = 11)
+}else{
 pdf("figures/composite_summary_plots.pdf",
     width = 8.5,
     height = 11)
+
+}
 for(grp in groups_to_fit){
 
   sub_grp <- species_groups %>%
@@ -706,7 +712,7 @@ fit2 <- mod2$sample(data = stan_data2,
                     refresh = 0,
                     adapt_delta = 0.9,
                     iter_warmup = 2000,
-                    iter_sampling = 2000)
+                    iter_sampling = 4000)
 
 sum2 <- fit2$summary(variables = NULL,
                      "mean",
@@ -717,6 +723,7 @@ sum2 <- fit2$summary(variables = NULL,
                      q97_5 = q97_5)
 
 mx_rhat2 <- max(sum2$rhat,na.rm = TRUE)
+
 if(mx_rhat2 > 1.02){
   fit2 <- mod2$sample(data = stan_data2,
                      parallel_chains = 4,
@@ -735,7 +742,7 @@ if(mx_rhat2 > 1.02){
 }
 
 annual_status_difference <- sum2 %>%
-  filter(grepl("annual_status",variable)) %>%
+  filter(grepl("annual_status",variable,fixed = TRUE)) %>%
   mutate(yearn2 = as.integer(str_extract_all(variable,
                                              "[[:digit:]]{1,}",
                                              simplify = TRUE)),
@@ -1071,7 +1078,7 @@ tst3 <- ggplot(data = annual_status_combine,
   xlab("")+
   theme_bw()+
   theme(plot.caption = element_text(size = 5))
-tst3
+print(tst3)
 }
 #}
 
@@ -1081,6 +1088,10 @@ tst3
 dev.off()
 #
 
-saveRDS(annual_status_combine,"output/annual_status_combine.rds")
+if(fit_alternate_socb_model){
+saveRDS(annual_status_combine,"output/annual_status_combine_comparing_models.rds")
+}else{
+  saveRDS(annual_status_combine,"output/annual_status_combine.rds")
 
+}
 

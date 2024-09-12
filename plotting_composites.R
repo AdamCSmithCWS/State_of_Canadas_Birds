@@ -59,7 +59,10 @@ all_composites_out <- all_composites %>%
   select(-c(ess_bulk,rhat,yearn2,model,variable)) %>%
   mutate(across(log_scale_indicator:percent_diff_uci,
                 .fns = ~signif(.x,digits = 3)))
+
+# Share composite_indicators_all.csv with Catherine for upload ------------
 write_csv(all_composites_out,"output/composite_indicators_all.csv")
+
 
 
 species_groups <- readRDS("data/species_groups.rds")

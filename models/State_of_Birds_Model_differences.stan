@@ -39,9 +39,7 @@ model {
    for(s in species[i,1:n_species_year[i]]){ // stepping through species with data
   ln_index[i,s] ~ normal(ln_index_true[i,s], ln_index_sd[i,s]);
     }
-    // for(s in species[i,n_species_year[i]:n_species]){ //stepping through species that are missing
-    // ln_index_true[i,s] ~ normal(0,1);
-    // }
+
   }
 
   sigma ~ student_t(3,0,0.1);
@@ -54,7 +52,13 @@ model {
 
 
  for(y in 1:n_years){
-   annual_status[y+1] = annual_status[y]+MU[y];
+   real noise1 = normal_rng(0,sigma[y]);
+   // adding a random draw from the annually estimated
+   // among-species variation in annual change to propagate uncertainty through time
+
+   annual_status[y+1] = annual_status[y]+MU[y]+noise1;
+
+
 
  }
 }

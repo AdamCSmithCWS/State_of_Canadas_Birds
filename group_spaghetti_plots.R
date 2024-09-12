@@ -82,17 +82,22 @@ sp_y <- inds_all_plot %>%
   group_by(speciesID,english_name, french_name) %>%
   summarise(first_year = min(year),
             last_year = max(year),
-            .groups = "drop")
+            mean_prec = 1/(mean(annual_diff_sd)^2),
+            .groups = "drop") %>%
+  mutate(prec_plot = scale(mean_prec, center = FALSE))
+
+
 
 inds_label <- inds_all_plot %>%
   left_join(.,sp_y,
-            by = c("speciesID","english_name")) %>%
+            by = c("speciesID","english_name","french_name")) %>%
   filter(year == last_year) %>%
   mutate(qual_dif = ifelse(percent_dif > 0,1,-1),
-         lbl = paste0(english_name,":",percent_dif,"%"))
+         lbl = paste0(english_name,":",percent_dif,"%"),
+         lblf = paste0(french_name,":",percent_dif,"%"))
 
 qual_difs <- inds_label %>%
-  select(speciesID,qual_dif)
+  select(speciesID,qual_dif,prec_plot)
 
 inds_all_plot <- inds_all_plot %>%
   left_join(qual_difs)
@@ -110,8 +115,9 @@ tst2 <- ggplot(data = annual_status_difference,
   geom_line(data = inds_all_plot,
             aes(x = year,y = scaled_status,
                 group = speciesID,
-                colour = qual_dif),
-            alpha = 0.3,
+                colour = qual_dif,
+                alpha = prec_plot),
+            #alpha = 0.3,
             inherit.aes = FALSE)+
   geom_ribbon(aes(ymin = q2_5,ymax = q97_5),
               alpha = 0.2)+
@@ -120,7 +126,7 @@ tst2 <- ggplot(data = annual_status_difference,
                            aes(x = year,y = scaled_status,
                                label = lbl,
                                colour = qual_dif),
-                           size = 2,
+                           size = 3,
                            max.overlaps = 30,
                            min.segment.length = 0,
                            nudge_x = 2,
@@ -152,6 +158,60 @@ pdf(paste0("figures/",grp_labl,"example.pdf"),
 print(tst2)
 
 dev.off()
+
+
+
+
+tst2 <- ggplot(data = annual_status_difference,
+               aes(x = year,y = mean))+
+  geom_hline(yintercept = 0)+
+  geom_line(data = inds_all_plot,
+            aes(x = year,y = scaled_status,
+                group = speciesID,
+                colour = qual_dif,
+                alpha = prec_plot),
+            #alpha = 0.3,
+            inherit.aes = FALSE)+
+  geom_ribbon(aes(ymin = q2_5,ymax = q97_5),
+              alpha = 0.2)+
+  geom_line()+
+  ggrepel::geom_text_repel(data = inds_label,
+                           aes(x = year,y = scaled_status,
+                               label = lblf,
+                               colour = qual_dif),
+                           size = 3,
+                           max.overlaps = 30,
+                           min.segment.length = 0,
+                           nudge_x = 2,
+                           alpha = 1,
+                           box.padding = 0.1,
+                           segment.alpha = 0.3,
+                           segment.size = 0.2,
+                           hjust = "left")+
+  scale_y_continuous(breaks = brks_log,
+                     labels = brks_labs,
+                     limits = c(yliml_spag,ylimu_spag))+
+  scale_x_continuous(limits = c(1970,2045),
+                     breaks = seq(1970,2020,by = 10),
+                     expand = c(0,0))+
+  colorspace::scale_color_continuous_diverging(rev = TRUE,
+                                               mid = 0,
+                                               n_interp = 3)+
+  #labs(title = paste(grp_labl))+
+  xlab("")+
+  ylab("Pourcentage de changement depuis la première année")+
+  theme_classic()+
+  theme(legend.position = "none")
+
+tst2
+
+pdf(paste0("figures/",grp_labl,"_example_Fr.pdf"),
+    width = 8,
+    height = 6)
+print(tst2)
+
+dev.off()
+
 
 
 
