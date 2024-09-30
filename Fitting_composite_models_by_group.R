@@ -81,7 +81,8 @@ if(re_download){
                               "",
                               x = groupNameFr,
                               fixed = TRUE),
-           include = toupper(include))
+           include = toupper(include)) %>%
+    filter(!(speciesID == 12231 & populationID == 8414))
 
 
   saveRDS(species_groups,"data/species_groups.rds")
@@ -124,6 +125,8 @@ if(re_download){
            popType == 1) %>%
     distinct()
 
+  tst<- rank_tbl %>%
+    inner_join(species_names)
 
 sp_simple <- sp_tbl %>%
   select(speciesCode,speciesID,
@@ -316,7 +319,8 @@ for(species in all_sp){
                       iter_warmup = 8000,
                       iter_sampling = 8000,
                       thin = 8,
-                      refresh = 0)
+                      refresh = 0,
+                      show_exceptions = FALSE)
     sum <- fit$summary(variables = NULL,
                        "mean",
                        "sd",
@@ -377,27 +381,46 @@ for(species in all_sp){
 
   all_smoothed_indices <- bind_rows(all_smoothed_indices,smooth_inds)
 
-  tst <- ggplot(data = smooth_inds,
-                aes(x = year, y = annual_diff))+
-    geom_line()
-  tst
+  # tst <- ggplot(data = smooth_inds,
+  #               aes(x = year, y = smooth_ind))+
+  #   geom_pointrange(data = inds,
+  #                   aes(x = year, y = ln_index,
+  #                       ymin = ln_index-ln_index_sd,
+  #                       ymax = ln_index+ln_index_sd))+
+  #   geom_ribbon(aes(ymin = smooth_ind_lci,
+  #                   ymax = smooth_ind_uci),
+  #               colour = NA, alpha = 0.3)+
+  #   geom_line()
+  # tst
 
   print(paste(species,"complete",round(which(all_sp == species)/length(all_sp),2)))
 
 }
 
-saveRDS(all_smoothed_indices,"socb_smoothed_indices.rds")
+#saveRDS(all_smoothed_indices,"socb_smoothed_indices_sub.rds")
 
 }
 # Prepare data ------------------------------------------------------------
 
+all_smoothed_indices <- readRDS("socb_smoothed_indices.rds") #
 
-all_smoothed_indices <- readRDS("socb_smoothed_indices.rds") %>%
+all_smoothed_indices <- all_smoothed_indices %>%
+  filter(!speciesID == 10360,
+         !speciesID == 3761)
+#
+
+all_smoothed_indices <- all_smoothed_indices %>%
+  mutate(speciesID = ifelse(speciesID == 3140,41568,speciesID),
+         speciesID = ifelse(speciesID == 12240,12231,speciesID))
+# all_smoothed_indices <- all_smoothed_indices %>%
+#   filter(!english_name == "King Rail")
+
+
+all_smoothed_indices <- all_smoothed_indices %>%
   rename_with(.,
               .fn = specid_rename) %>%
   left_join(.,species_names,
             by = "speciesID")
-
 
 
 all_ind_compare <- all_smoothed_indices %>%
@@ -507,14 +530,15 @@ annual_status_combine <- NULL
 
 
 
-re_fit_all <- TRUE
+re_fit_all <- FALSE
 
-#groups_to_refit <- groups_to_fit[c(33)] #NULL #
+#groups_to_refit <- groups_to_fit[c(18,38)] #NULL #
 groups_to_refit <- NULL
 
 drop_low_confidence <- TRUE
 low_confid <- c("DD")
 plot_low_confidence <- FALSE
+
 if(!plot_low_confidence){
 
   sp_drop_low_confidence <- species_confidence %>%
@@ -536,6 +560,7 @@ pdf("figures/composite_summary_plots.pdf",
     height = 11)
 
 }
+
 for(grp in groups_to_fit){
 
   sub_grp <- species_groups %>%
@@ -558,13 +583,41 @@ for(grp in groups_to_fit){
 
 
 
-
-  species_sel <- species_groups %>%
+    species_sel <- species_groups %>%
     filter(groupName == grp,
            include == "Y") %>%
     distinct()
 
+
+    # species_sel1 <- species_groups %>%
+    #   filter(groupName == "Forest Birds: All",
+    #          include == "Y") %>%
+    #   distinct()
+    #
+    # species_sel2 <- species_groups %>%
+    #   filter(groupName == "Long-Distance Migrants: All",
+    #          include == "Y") %>%
+    #   distinct()
+    # #
+    # species_sel3 <- species_sel2[which(species_sel2$speciesID %in% species_sel1$speciesID),]
+    # #
+    #
+    # sp_comp_temp <- species_sel3 %>%
+    #   select(speciesID,groupName) %>%
+    #   rename(groupName_intersection = groupName) %>%
+    #   full_join(species_sel) %>%
+    #   left_join(species_names)
+    #
+    # sp_miss <- sp_comp_temp %>%
+    #   filter(is.na(groupID))
+    #
+    #    test <- species_groups %>%
+    # filter(speciesID %in% sp_miss$speciesID,
+    #        include == "Y") %>%
+    #   left_join(species_names)
+
   # Dropping low confidence species -----------------------------------------
+
 
   if(drop_low_confidence){
 sp_drop_low_confidence <- species_confidence %>%
@@ -676,6 +729,7 @@ n_species_year <- vector("integer",length = n_years)
 
 re_fit <- ifelse(re_fit_all | grp %in% groups_to_refit,
                  TRUE,FALSE)
+
 if(re_fit){
 
 for(y in 1:n_years){
@@ -712,7 +766,8 @@ fit2 <- mod2$sample(data = stan_data2,
                     refresh = 0,
                     adapt_delta = 0.9,
                     iter_warmup = 2000,
-                    iter_sampling = 4000)
+                    iter_sampling = 4000,
+                    show_exceptions = FALSE)
 
 sum2 <- fit2$summary(variables = NULL,
                      "mean",
@@ -730,7 +785,8 @@ if(mx_rhat2 > 1.02){
                      iter_warmup = 4000,
                      iter_sampling = 4000,
                      thin = 2,
-                     refresh = 0)
+                     refresh = 0,
+                     show_exceptions = FALSE)
   sum2 <- fit2$summary(variables = NULL,
                        "mean",
                        "sd",
@@ -821,7 +877,8 @@ if(fit_alternate_socb_model){
                     refresh = 0,
                     adapt_delta = 0.8,
                     iter_warmup = 2000,
-                    iter_sampling = 4000)
+                    iter_sampling = 4000,
+                    show_exceptions = FALSE)
 
   sum <- fit$summary(variables = NULL,
                      "mean",
@@ -838,7 +895,8 @@ if(fit_alternate_socb_model){
                       iter_warmup = 8000,
                       iter_sampling = 8000,
                       thin = 8,
-                      refresh = 0)
+                      refresh = 0,
+                      show_exceptions = FALSE)
     sum <- fit$summary(variables = NULL,
                        "mean",
                        "sd",
@@ -950,7 +1008,7 @@ ylimu_spag <- max(inds_all_plot$scaled_status)
 yliml_spag <- min(inds_all_plot$scaled_status)
 
 
-if(grp == "Long Distance Migrants : Residents"){
+if(grp == "Long-Distance Migrants: Residents"){
   yliml_spag <- log((-90/100)+1)
   y_sub <- inds_all %>%
     filter(speciesID == 1410,

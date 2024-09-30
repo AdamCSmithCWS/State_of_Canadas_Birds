@@ -61,7 +61,7 @@ all_composites_out <- all_composites %>%
                 .fns = ~signif(.x,digits = 3)))
 
 # Share composite_indicators_all.csv with Catherine for upload ------------
-write_csv(all_composites_out,"output/composite_indicators_all.csv")
+write_csv(all_composites_out,"composite_indicators_all.csv")
 
 
 
