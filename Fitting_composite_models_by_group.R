@@ -397,23 +397,30 @@ for(species in all_sp){
 
 }
 
-#saveRDS(all_smoothed_indices,"socb_smoothed_indices_sub.rds")
+#saveRDS(all_smoothed_indices,"socb_smoothed_indices.rds")
 
 }
 # Prepare data ------------------------------------------------------------
 
 all_smoothed_indices <- readRDS("socb_smoothed_indices.rds") #
 
-all_smoothed_indices <- all_smoothed_indices %>%
-  filter(!speciesID == 10360,
-         !speciesID == 3761)
+# all_smoothed_indices <- all_smoothed_indices %>%
+#   filter(!speciesID == 4220)
+#
+# all_smoothed_indices <- all_smoothed_indices %>%
+#   filter(!speciesID == 10360, #ATTW now included
+#          !speciesID == 3761)
+#
+#
 #
 
-all_smoothed_indices <- all_smoothed_indices %>%
-  mutate(speciesID = ifelse(speciesID == 3140,41568,speciesID),
-         speciesID = ifelse(speciesID == 12240,12231,speciesID))
 # all_smoothed_indices <- all_smoothed_indices %>%
-#   filter(!english_name == "King Rail")
+#   mutate(speciesID = ifelse(speciesID == 3140,41568,speciesID),
+#          speciesID = ifelse(speciesID == 12240,12231,speciesID))
+
+all_smoothed_indices <- all_smoothed_indices %>%
+  mutate(speciesID = ifelse(speciesID == 12231,12250,speciesID))
+
 
 
 all_smoothed_indices <- all_smoothed_indices %>%
@@ -532,8 +539,12 @@ annual_status_combine <- NULL
 
 re_fit_all <- FALSE
 
-#groups_to_refit <- groups_to_fit[c(18,38)] #NULL #
-groups_to_refit <- NULL
+main_groups <- groups_to_fit[grepl("All",groups_to_fit)]
+
+groups_to_refit <- groups_to_fit[!grepl("All",groups_to_fit)] #NULL #
+groups_to_refit <- groups_to_refit[-c(38:41)] #NULL #
+#groups_to_refit <- NULL
+
 
 drop_low_confidence <- TRUE
 low_confid <- c("DD")

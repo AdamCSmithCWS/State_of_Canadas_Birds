@@ -58,7 +58,7 @@ all_composites_out <- all_composites %>%
            percent_diff, percent_diff_lci, percent_diff_uci) %>%
   select(-c(ess_bulk,rhat,yearn2,model,variable)) %>%
   mutate(across(log_scale_indicator:percent_diff_uci,
-                .fns = ~signif(.x,digits = 3)))
+                .fns = ~signif(.x,digits = 4)))
 
 # Share composite_indicators_all.csv with Catherine for upload ------------
 write_csv(all_composites_out,"composite_indicators_all.csv")
@@ -81,7 +81,7 @@ main_groups <- species_groups %>%
 out_composites <- all_composites %>%
   select(groupName,year,mean,q2_5,q97_5,percent_diff,percent_diff_lci,percent_diff_uci) %>%
   mutate(across(mean:percent_diff_uci,
-                .fns = ~signif(.x,digits = 3)))
+                .fns = ~signif(.x,digits = 4)))
 # write_csv(out_composites,
 #           "output/saved_draft_composite_trajectories.csv")
 #
